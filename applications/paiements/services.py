@@ -62,18 +62,33 @@ def initier_demande_paiement_paytech(
         ipn_url = f"{base_pub}/api/paiements/webhook-ipn/"
 
     # PayTech et Wave (Intech API) exigent impérativement des URLs valides en HTTPS.
-    # Si le frontend est en local (ex: http://localhost:4200), Wave rejette le paiement avec :
-    # "successRedirectUrl doit être un URL".
-    # On garantit donc des URLs HTTPS complètes et conformes.
-    if url_succes_client and url_succes_client.startswith("https://") and "localhost" not in url_succes_client and "127.0.0.1" not in url_succes_client:
-        success_url = url_succes_client
-    else:
-        success_url = f"https://ayyou.sn/commandes/suivi/{commande.id}"
+    # En environnement local (ex: http://localhost:4200), on passe par un pont HTTPS standard (httpbin)
+    # qui effectue un 302 Redirect vers le localhost du client. En production, l'URL HTTPS directe est utilisée.
+    from urllib.parse import quote
 
-    if url_annulation_client and url_annulation_client.startswith("https://") and "localhost" not in url_annulation_client and "127.0.0.1" not in url_annulation_client:
-        cancel_url = url_annulation_client
+    cible_succes = url_succes_client or f"http://localhost:4200/commandes/suivi/{commande.id}?paiement=succes"
+    if not (cible_succes.startswith("http://") or cible_succes.startswith("https://")):
+        cible_succes = f"http://localhost:4200/commandes/suivi/{commande.id}?paiement=succes"
+    if "paiement=succes" not in cible_succes:
+        sep = "&" if "?" in cible_succes else "?"
+        cible_succes = f"{cible_succes}{sep}paiement=succes"
+
+    if cible_succes.startswith("https://") and "localhost" not in cible_succes and "127.0.0.1" not in cible_succes:
+        success_url = cible_succes
     else:
-        cancel_url = f"https://ayyou.sn/commandes/suivi/{commande.id}?paiement=en_attente"
+        success_url = f"https://httpbin.org/redirect-to?url={quote(cible_succes, safe='')}"
+
+    cible_annulation = url_annulation_client or f"http://localhost:4200/commandes/suivi/{commande.id}?paiement=en_attente"
+    if not (cible_annulation.startswith("http://") or cible_annulation.startswith("https://")):
+        cible_annulation = f"http://localhost:4200/commandes/suivi/{commande.id}?paiement=en_attente"
+    if "paiement=" not in cible_annulation:
+        sep = "&" if "?" in cible_annulation else "?"
+        cible_annulation = f"{cible_annulation}{sep}paiement=en_attente"
+
+    if cible_annulation.startswith("https://") and "localhost" not in cible_annulation and "127.0.0.1" not in cible_annulation:
+        cancel_url = cible_annulation
+    else:
+        cancel_url = f"https://httpbin.org/redirect-to?url={quote(cible_annulation, safe='')}"
 
     payload = {
         "item_name": f"AYYOU - Commande {commande.reference}",

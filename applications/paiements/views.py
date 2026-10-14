@@ -106,9 +106,17 @@ class VueVerifierPaiement(APIView):
         if not commande_id:
             return Response({"detail": "Le paramètre commande_id est requis."}, status=status.HTTP_400_BAD_REQUEST)
 
-        commande = get_object_or_404(Commande, pk=commande_id)
+        cmd_str = str(commande_id).strip()
+        commande = None
+        if cmd_str.isdigit():
+            commande = Commande.objects.filter(pk=int(cmd_str)).first()
+        if not commande:
+            commande = Commande.objects.filter(reference=cmd_str).first()
+        if not commande:
+            return Response({"detail": "Commande introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
         if commande.client_id != request.user.id and not request.user.is_superuser:
             raise AccesRefuse("Vous ne pouvez vérifier que vos propres commandes.")
 
-        tentative = verifier_statut_paytech_en_ligne(commande_id=int(commande_id))
+        tentative = verifier_statut_paytech_en_ligne(commande_id=commande.id)
         return Response(SerializerReponsePaiement(tentative).data, status=status.HTTP_200_OK)

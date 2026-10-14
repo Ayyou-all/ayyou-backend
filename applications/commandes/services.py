@@ -293,6 +293,32 @@ def transitionner_statut_commande(
         commentaire=commentaire or motif,
     )
 
+    if nouveau_statut == StatutCommande.CREEE_EN_ATTENTE:
+        try:
+            from applications.notifications.services import creer_notification
+            from applications.notifications.models import TypeNotification
+            if commande.etablissement and commande.etablissement.gerant:
+                creer_notification(
+                    destinataire=commande.etablissement.gerant,
+                    titre=f"Nouvelle commande payée {commande.reference} !",
+                    message=f"Commande de {commande.total_fcfa} FCFA par {commande.client.nom_complet if commande.client else 'Client'}.",
+                    type_notification=TypeNotification.COMMANDE_NOUVELLE,
+                    texte_vocal=f"Nouvelle commande payée {commande.reference}",
+                    reference_commande=commande.reference,
+                )
+            if commande.client:
+                creer_notification(
+                    destinataire=commande.client,
+                    titre=f"Paiement validé pour {commande.reference}",
+                    message=f"Votre commande auprès de {commande.etablissement.nom} a été confirmée et transmise en cuisine.",
+                    type_notification=TypeNotification.COMMANDE_EN_PREPARATION,
+                    texte_vocal="Paiement validé avec succès",
+                    reference_commande=commande.reference,
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger("ayyou.commandes").warning(f"Erreur notification post-paiement: {e}")
+
     return commande
 
 
