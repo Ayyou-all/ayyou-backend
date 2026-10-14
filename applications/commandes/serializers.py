@@ -204,7 +204,7 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
 
 
 class SerializerLigneCreation(serializers.Serializer):
-    plat_id = serializers.IntegerField()
+    plat_id = serializers.IntegerField(required=False, allow_null=True)
     quantite = serializers.IntegerField(min_value=1, default=1)
     instructions_speciales = serializers.CharField(required=False, allow_blank=True, default="")
 
@@ -217,10 +217,20 @@ class SerializerCreationCommande(serializers.Serializer):
     telephone_contact = serializers.CharField(max_length=30, required=False, allow_blank=True)
     instructions_livraison = serializers.CharField(required=False, allow_blank=True, default="")
     mode_paiement = serializers.ChoiceField(choices=ModePaiement.choices, default=ModePaiement.WAVE)
-    latitude_livraison = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
-    longitude_livraison = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    latitude_livraison = serializers.FloatField(required=False, allow_null=True)
+    longitude_livraison = serializers.FloatField(required=False, allow_null=True)
     source_video_id = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     articles = SerializerLigneCreation(many=True, required=False)
+
+    def validate_latitude_livraison(self, value):
+        if value is not None:
+            return round(float(value), 6)
+        return value
+
+    def validate_longitude_livraison(self, value):
+        if value is not None:
+            return round(float(value), 6)
+        return value
 
 
 class SerializerActionAcceptation(serializers.Serializer):

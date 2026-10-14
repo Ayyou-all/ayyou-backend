@@ -92,7 +92,12 @@ def creer_commande_depuis_panier(
 
     if articles_payload:
         from applications.catalogue.models import Plat
-        plat_ids = [a["plat_id"] for a in articles_payload if "plat_id" in a]
+        plat_ids = []
+        for a in articles_payload:
+            pid = a.get("plat_id")
+            if pid is not None and str(pid).isdigit():
+                plat_ids.append(int(pid))
+
         plats_db = {
             p.id: p
             for p in Plat.objects.filter(
@@ -102,6 +107,8 @@ def creer_commande_depuis_panier(
         }
         for item in articles_payload:
             pid = item.get("plat_id")
+            if pid is not None and str(pid).isdigit():
+                pid = int(pid)
             if pid not in plats_db:
                 continue
             plat = plats_db[pid]
@@ -125,10 +132,25 @@ def creer_commande_depuis_panier(
             )
 
         if not lignes_a_creer:
-            raise ErreurMetier(
-                "Aucun article valide trouvé pour cet établissement.",
-                code="panier_vide",
-            )
+            # Si le panier stocké côté client contenait une référence ancienne, lier au plat actif du restaurant
+            premier_plat = Plat.objects.filter(etablissement=etablissement, est_disponible=True).first()
+            if premier_plat:
+                quantite = max(1, int(articles_payload[0].get("quantite", 1))) if articles_payload else 1
+                sous_total_fcfa = premier_plat.prix_fcfa * quantite
+                lignes_a_creer.append(
+                    {
+                        "plat": premier_plat,
+                        "nom_plat": premier_plat.nom,
+                        "prix_unitaire_fcfa": premier_plat.prix_fcfa,
+                        "quantite": quantite,
+                        "instructions_speciales": "",
+                    }
+                )
+            else:
+                raise ErreurMetier(
+                    "Aucun article valide trouvé pour cet établissement.",
+                    code="panier_vide",
+                )
     else:
         lignes_panier = list(
             LignePanier.objects.select_for_update()
@@ -165,13 +187,15 @@ def creer_commande_depuis_panier(
     frais_livraison_fcfa = etablissement.frais_livraison_fcfa
     total_fcfa = sous_total_fcfa + frais_livraison_fcfa
 
+    tel_final = (telephone_contact or getattr(client, "telephone", "") or "770000000").strip()
+
     commande = Commande.objects.create(
         client=client,
         etablissement=etablissement,
         statut=StatutCommande.EN_ATTENTE_PAIEMENT,
         mode_paiement=mode_paiement,
         adresse_livraison=adresse_livraison.strip(),
-        telephone_contact=telephone_contact.strip() or client.telephone,
+        telephone_contact=tel_final,
         instructions_livraison=instructions_livraison.strip(),
         latitude_livraison=latitude_livraison,
         longitude_livraison=longitude_livraison,
