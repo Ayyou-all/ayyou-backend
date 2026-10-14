@@ -28,11 +28,15 @@ class VueFilPublications(generics.ListAPIView):
     serializer_class = SerializerPublicationFil
 
     def get_queryset(self):
-        return (
+        qs = (
             Publication.objects.filter(est_publie=True, etablissement__statut_validation="ACTIF")
             .select_related("etablissement", "plat")
             .prefetch_related("mentions_jeaime")
         )
+        etablissement_id = self.request.query_params.get("etablissement") or self.request.query_params.get("etablissement_id")
+        if etablissement_id:
+            qs = qs.filter(etablissement_id=etablissement_id)
+        return qs
 
 
 class VueDetailPublication(generics.RetrieveAPIView):

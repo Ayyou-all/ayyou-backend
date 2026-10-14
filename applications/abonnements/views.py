@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 
 from applications.etablissements.models import Etablissement
 
-from .models import AbonnementEtablissement
+from .models import AbonnementEtablissement, LikeEtablissement
 from .serializers import SerializerAbonnement
 
 
@@ -64,3 +64,40 @@ class VueMesAbonnements(generics.ListAPIView):
             AbonnementEtablissement.objects.filter(utilisateur=self.request.user)
             .select_related("etablissement")
         )
+
+
+class VueBasculerLikeEtablissement(APIView):
+    """
+    Bascule la mention J'aime d'un client envers un établissement (restaurant).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, etablissement_id):
+        etablissement = get_object_or_404(Etablissement, pk=etablissement_id)
+        like, cree = LikeEtablissement.objects.get_or_create(
+            utilisateur=request.user,
+            etablissement=etablissement,
+        )
+
+        if not cree:
+            like.delete()
+            est_aime = False
+        else:
+            est_aime = True
+
+        total_likes = etablissement.likes.count()
+
+        return Response(
+            {
+                "estAime": est_aime,
+                "nombreLikes": total_likes,
+                "message": (
+                    f"Vous aimez {etablissement.nom}."
+                    if est_aime
+                    else f"Vous n'aimez plus {etablissement.nom}."
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+

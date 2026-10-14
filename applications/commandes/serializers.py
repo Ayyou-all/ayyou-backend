@@ -66,6 +66,11 @@ class SerializerCommandeClient(serializers.ModelSerializer):
     livreur = serializers.SerializerMethodField()
     etape_suivi = serializers.SerializerMethodField()
     heure_arrivee_estimee = serializers.SerializerMethodField()
+    latitude_livraison = serializers.FloatField(read_only=True, allow_null=True)
+    longitude_livraison = serializers.FloatField(read_only=True, allow_null=True)
+    restaurant_latitude = serializers.FloatField(source="etablissement.latitude", read_only=True, allow_null=True)
+    restaurant_longitude = serializers.FloatField(source="etablissement.longitude", read_only=True, allow_null=True)
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
 
     class Meta:
         model = Commande
@@ -76,6 +81,7 @@ class SerializerCommandeClient(serializers.ModelSerializer):
             "adresse_image_restaurant",
             "date_heure_texte",
             "statut",
+            "statut_libelle",
             "delai_ou_remarque",
             "montant_total_fcfa",
             "code_livraison",
@@ -85,6 +91,10 @@ class SerializerCommandeClient(serializers.ModelSerializer):
             "articles",
             "est_en_cours",
             "adresse_livraison",
+            "latitude_livraison",
+            "longitude_livraison",
+            "restaurant_latitude",
+            "restaurant_longitude",
             "mode_paiement",
             "source_video_id",
         ]

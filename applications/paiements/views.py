@@ -21,7 +21,11 @@ from applications.utilisateurs.permissions import EstClient
 
 from .models import TentativePaiement
 from .serializers import SerializerDemandePaiement, SerializerReponsePaiement
-from .services import initier_demande_paiement_paytech, traiter_notification_ipn_paytech
+from .services import (
+    initier_demande_paiement_paytech,
+    traiter_notification_ipn_paytech,
+    verifier_statut_paytech_en_ligne,
+)
 
 
 class VueInitierPaiement(APIView):
@@ -87,3 +91,24 @@ class VueStatutPaiement(APIView):
             raise AccesRefuse("Accès non autorisé à cette transaction.")
 
         return Response(SerializerReponsePaiement(tentative).data)
+
+
+class VueVerifierPaiement(APIView):
+    """
+    Vérifie l'état d'un paiement auprès de PayTech (par exemple suite à la redirection retour du client)
+    et synchronise le statut de la commande en temps réel.
+    """
+
+    permission_classes = [EstClient]
+
+    def post(self, request):
+        commande_id = request.data.get("commande_id")
+        if not commande_id:
+            return Response({"detail": "Le paramètre commande_id est requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        commande = get_object_or_404(Commande, pk=commande_id)
+        if commande.client_id != request.user.id and not request.user.is_superuser:
+            raise AccesRefuse("Vous ne pouvez vérifier que vos propres commandes.")
+
+        tentative = verifier_statut_paytech_en_ligne(commande_id=int(commande_id))
+        return Response(SerializerReponsePaiement(tentative).data, status=status.HTTP_200_OK)

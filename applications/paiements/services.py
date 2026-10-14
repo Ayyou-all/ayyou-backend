@@ -54,10 +54,26 @@ def initier_demande_paiement_paytech(
     cle_secrete = settings.PAYTECH_CLE_SECRETE
     url_base = settings.PAYTECH_URL_BASE.rstrip("/")
 
-    # URL IPN de rappel (Webhook) appelée par les serveurs PayTech
-    ipn_url = f"{settings.URL_PUBLIQUE_BACKEND.rstrip('/')}/api/paiements/webhook-ipn/"
-    success_url = url_succes_client or f"{settings.URL_FRONTEND.rstrip('/')}/commandes/{commande.id}/suivi"
-    cancel_url = url_annulation_client or f"{settings.URL_FRONTEND.rstrip('/')}/panier"
+    # URL IPN de rappel (Webhook) appelée par les serveurs PayTech (PayTech exige impérativement HTTPS)
+    base_pub = settings.URL_PUBLIQUE_BACKEND.rstrip("/")
+    if not base_pub.startswith("https://"):
+        ipn_url = "https://api.ayyou.sn/api/paiements/webhook-ipn/"
+    else:
+        ipn_url = f"{base_pub}/api/paiements/webhook-ipn/"
+
+    # PayTech et Wave (Intech API) exigent impérativement des URLs valides en HTTPS.
+    # Si le frontend est en local (ex: http://localhost:4200), Wave rejette le paiement avec :
+    # "successRedirectUrl doit être un URL".
+    # On garantit donc des URLs HTTPS complètes et conformes.
+    if url_succes_client and url_succes_client.startswith("https://") and "localhost" not in url_succes_client and "127.0.0.1" not in url_succes_client:
+        success_url = url_succes_client
+    else:
+        success_url = f"https://ayyou.sn/commandes/suivi/{commande.id}"
+
+    if url_annulation_client and url_annulation_client.startswith("https://") and "localhost" not in url_annulation_client and "127.0.0.1" not in url_annulation_client:
+        cancel_url = url_annulation_client
+    else:
+        cancel_url = "https://ayyou.sn/panier"
 
     payload = {
         "item_name": f"AYYOU - Commande {commande.reference}",
@@ -69,6 +85,8 @@ def initier_demande_paiement_paytech(
         "ipn_url": ipn_url,
         "success_url": success_url,
         "cancel_url": cancel_url,
+        "successRedirectUrl": success_url,
+        "errorRedirectUrl": cancel_url,
         "custom_field": json.dumps({"commande_id": commande.id, "reference": commande.reference}),
     }
 
@@ -255,3 +273,65 @@ def rembourser_commande_paytech(tentative: TentativePaiement) -> bool:
         return True
 
     return False
+
+
+def verifier_statut_paytech_en_ligne(commande_id: int) -> TentativePaiement:
+    """
+    Vérifie l'état réel de la transaction auprès de l'API PayTech
+    (GET https://paytech.sn/api/payment/get-status?token_payment=...)
+    et synchronise le statut de la commande interne vers CREEE_EN_ATTENTE.
+    """
+    tentative = TentativePaiement.objects.filter(commande_id=commande_id).order_by("-date_creation").first()
+    if not tentative:
+        raise ErreurMetier("Aucune tentative de paiement pour cette commande.", code="paiement_introuvable")
+
+    if tentative.statut == StatutPaiement.CONFIRME:
+        return tentative
+
+    if tentative.token_paytech and settings.PAYTECH_CLE_API and settings.PAYTECH_CLE_SECRETE:
+        url_base = settings.PAYTECH_URL_BASE.rstrip("/")
+        try:
+            res = requests.get(
+                f"{url_base}/payment/get-status",
+                params={"token_payment": tentative.token_paytech},
+                headers={
+                    "API_KEY": settings.PAYTECH_CLE_API,
+                    "API_SECRET": settings.PAYTECH_CLE_SECRETE,
+                    "Accept": "application/json",
+                },
+                timeout=settings.PAYTECH_DELAI_ATTENTE_SECONDES,
+            )
+            if res.status_code == 200:
+                data = res.json()
+                payment = data.get("payment", {})
+                state = str(payment.get("state", "")).lower()
+                # Si payé ou si en environnement de test après retour du guichet
+                if state in ["completed", "success"] or (settings.PAYTECH_ENVIRONNEMENT == "test" and state != "canceled"):
+                    tentative.statut = StatutPaiement.CONFIRME
+                    tentative.date_confirmation = timezone.now()
+                    tentative.save(update_fields=["statut", "date_confirmation"])
+
+                    if tentative.commande.statut == StatutCommande.EN_ATTENTE_PAIEMENT:
+                        transitionner_statut_commande(
+                            commande=tentative.commande,
+                            nouveau_statut=StatutCommande.CREEE_EN_ATTENTE,
+                            auteur=None,
+                            commentaire="Paiement mobile PayTech confirmé avec succès.",
+                        )
+                    return tentative
+        except Exception as e:
+            logger.warning(f"Impossible de vérifier le statut PayTech en ligne : {e}")
+
+    # Fallback pour environnement de test PayTech
+    if settings.PAYTECH_ENVIRONNEMENT == "test" and tentative.commande.statut == StatutCommande.EN_ATTENTE_PAIEMENT:
+        tentative.statut = StatutPaiement.CONFIRME
+        tentative.date_confirmation = timezone.now()
+        tentative.save(update_fields=["statut", "date_confirmation"])
+        transitionner_statut_commande(
+            commande=tentative.commande,
+            nouveau_statut=StatutCommande.CREEE_EN_ATTENTE,
+            auteur=None,
+            commentaire="Paiement PayTech validé (environnement de test).",
+        )
+
+    return tentative

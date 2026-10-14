@@ -58,7 +58,8 @@ class SerializerPublicationFil(serializers.ModelSerializer):
         return construire_url_absolue(self.context.get("request"), obj.etablissement.logo) or ""
 
     def get_estAbonne(self, obj):
-        user = self.context.get("request").user if self.context.get("request") else None
+        req = self.context.get("request")
+        user = getattr(req, "user", None)
         if not user or not user.is_authenticated:
             return False
         # Vérification si l'utilisateur suit l'établissement
@@ -92,7 +93,8 @@ class SerializerPublicationFil(serializers.ModelSerializer):
         return str(count)
 
     def get_estAime(self, obj):
-        user = self.context.get("request").user if self.context.get("request") else None
+        req = self.context.get("request")
+        user = getattr(req, "user", None)
         if not user or not user.is_authenticated:
             return False
         return MentionJeaime.objects.filter(utilisateur=user, publication=obj).exists()
