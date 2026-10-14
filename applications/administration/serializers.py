@@ -5,6 +5,7 @@ Serializers pour les actions et le tableau de bord d'administration AYYOU.
 from rest_framework import serializers
 
 from applications.communs.choix import StatutValidationPartenaire
+from applications.communs.outils import construire_url_absolue
 from applications.etablissements.models import Etablissement
 from applications.livraisons.models import ProfilLivreur
 from applications.utilisateurs.serializers import SerializerDocumentJustificatif
@@ -26,6 +27,8 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
     telephoneGerant = serializers.CharField(source="gerant.telephone", read_only=True)
     totalCommandes = serializers.SerializerMethodField()
     noteMoyenne = serializers.SerializerMethodField()
+    adresse_logo = serializers.SerializerMethodField()
+    adresse_couverture = serializers.SerializerMethodField()
 
     platsMenu = serializers.SerializerMethodField()
 
@@ -51,7 +54,15 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
             "noteMoyenne",
             "documents",
             "platsMenu",
+            "adresse_logo",
+            "adresse_couverture",
         ]
+
+    def get_adresse_logo(self, obj):
+        return construire_url_absolue(self.context.get("request"), obj.logo)
+
+    def get_adresse_couverture(self, obj):
+        return construire_url_absolue(self.context.get("request"), obj.couverture)
 
     def get_platsMenu(self, obj):
         return [
@@ -86,6 +97,7 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
     dateInscription = serializers.DateTimeField(source="utilisateur.date_creation", read_only=True)
     totalLivraisons = serializers.SerializerMethodField()
     noteMoyenne = serializers.SerializerMethodField()
+    photo = serializers.SerializerMethodField()
 
     class Meta:
         model = ProfilLivreur
@@ -104,8 +116,14 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
             "telephone",
             "totalLivraisons",
             "noteMoyenne",
+            "photo",
             "documents",
         ]
+
+    def get_photo(self, obj):
+        if obj.utilisateur and obj.utilisateur.photo:
+            return construire_url_absolue(self.context.get("request"), obj.utilisateur.photo)
+        return None
 
     def get_documents(self, obj):
         if not obj.utilisateur:

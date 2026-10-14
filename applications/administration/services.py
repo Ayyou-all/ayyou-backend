@@ -118,7 +118,7 @@ from django.utils import timezone
 from applications.utilisateurs.models import Role, Utilisateur
 
 
-def calculer_statistiques_globales() -> dict:
+def calculer_statistiques_globales(request=None) -> dict:
     """
     Calcule les indicateurs clés de la plateforme AYYOU pour le tableau de bord Admin.
     Alimente également les graphiques réels (7 derniers jours) et les dernières validations.
@@ -190,36 +190,46 @@ def calculer_statistiques_globales() -> dict:
             "yPourcentage": y_coord,
         })
 
-    # 2. Dernières validations réelles (priorité absolue aux demandes en attente)
+    # 2. Dernières validations réelles (strictement les demandes en attente de modération)
+    from applications.communs.outils import construire_url_absolue
+
     dernieres_validations = []
-    etabs_en_attente = list(Etablissement.objects.filter(statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION).order_by("-id"))
-    etabs_autres = list(Etablissement.objects.exclude(statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION).order_by("-id")[:3])
-    for etab in (etabs_en_attente + etabs_autres)[:4]:
+    etabs_en_attente = list(
+        Etablissement.objects.filter(
+            statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION
+        ).order_by("-id")[:6]
+    )
+    for etab in etabs_en_attente:
+        logo_url = construire_url_absolue(request, etab.logo)
         dernieres_validations.append({
             "identifiant": f"rest-{etab.id}",
             "nom": etab.nom,
-            "specialiteOuVehicule": etab.type_etablissement or "Restaurant",
+            "specialiteOuVehicule": etab.specialite or etab.type_etablissement or "Restaurant",
             "type": "RESTAURANT",
-            "iconeOuPhoto": "fa-solid fa-utensils",
-            "estPhoto": False,
+            "iconeOuPhoto": logo_url if logo_url else "fa-solid fa-utensils",
+            "estPhoto": bool(logo_url),
             "classeFondIcone": "bg-rose-50 text-[#E51824]",
             "dateInscription": etab.date_creation.strftime("%d %b. %Y") if hasattr(etab, "date_creation") and etab.date_creation else "Récemment",
-            "statut": "EN_ATTENTE" if etab.statut_validation == StatutValidationPartenaire.EN_ATTENTE_VALIDATION else "VALIDE",
+            "statut": "EN_ATTENTE",
         })
 
-    livs_en_attente = list(ProfilLivreur.objects.select_related("utilisateur").filter(statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION).order_by("-id"))
-    livs_autres = list(ProfilLivreur.objects.select_related("utilisateur").exclude(statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION).order_by("-id")[:3])
-    for liv in (livs_en_attente + livs_autres)[:4]:
+    livs_en_attente = list(
+        ProfilLivreur.objects.select_related("utilisateur")
+        .filter(statut_validation=StatutValidationPartenaire.EN_ATTENTE_VALIDATION)
+        .order_by("-id")[:6]
+    )
+    for liv in livs_en_attente:
+        photo_url = construire_url_absolue(request, liv.utilisateur.photo)
         dernieres_validations.append({
             "identifiant": f"liv-{liv.id}",
             "nom": liv.utilisateur.nom_complet,
             "specialiteOuVehicule": f"{liv.type_vehicule} ({liv.nom_vehicule or 'Véhicule'})",
             "type": "LIVREUR",
-            "iconeOuPhoto": "fa-solid fa-motorcycle",
-            "estPhoto": False,
+            "iconeOuPhoto": photo_url if photo_url else "fa-solid fa-motorcycle",
+            "estPhoto": bool(photo_url),
             "classeFondIcone": "bg-amber-50 text-amber-600",
             "dateInscription": liv.date_creation.strftime("%d %b. %Y") if hasattr(liv, "date_creation") and liv.date_creation else "Récemment",
-            "statut": "EN_ATTENTE" if liv.statut_validation == StatutValidationPartenaire.EN_ATTENTE_VALIDATION else "VALIDE",
+            "statut": "EN_ATTENTE",
         })
 
     # 3. Top des restaurants par volume de commandes

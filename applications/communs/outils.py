@@ -1,5 +1,6 @@
 """Petites fonctions utilitaires sans dépendance métier."""
 
+import os
 import secrets
 import string
 
@@ -25,4 +26,10 @@ def construire_url_absolue(requete: HttpRequest | None, fichier) -> str | None:
         url = fichier.url
     except ValueError:
         return None
-    return requete.build_absolute_uri(url) if requete else url
+    if requete:
+        return requete.build_absolute_uri(url)
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    base = os.getenv("AYYOU_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    return f"{base}{url}" if url.startswith("/") else f"{base}/{url}"
+

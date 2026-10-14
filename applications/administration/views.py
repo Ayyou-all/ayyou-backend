@@ -30,7 +30,7 @@ class VueStatistiquesGlobales(APIView):
     permission_classes = [EstAdministrateur]
 
     def get(self, request):
-        stats = calculer_statistiques_globales()
+        stats = calculer_statistiques_globales(request=request)
         return Response(stats)
 
 
