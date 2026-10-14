@@ -130,7 +130,7 @@ def calculer_statistiques_globales(request=None) -> dict:
             StatutCommande.ECHEC_LIVRAISON,
         ]
     )
-    total_commandes = Commande.objects.count()
+    total_commandes = Commande.objects.exclude(statut=StatutCommande.EN_ATTENTE_PAIEMENT).count()
     commandes_livrees = Commande.objects.filter(statut=StatutCommande.LIVREE).count()
     commandes_en_cours = Commande.objects.filter(
         statut__in=[
@@ -174,7 +174,11 @@ def calculer_statistiques_globales(request=None) -> dict:
     for i in range(6, -1, -1):
         debut_jour = (maintenant - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
         fin_jour = debut_jour + timedelta(days=1)
-        nb_cmd = Commande.objects.filter(date_creation__gte=debut_jour, date_creation__lt=fin_jour).count()
+        nb_cmd = (
+            Commande.objects.exclude(statut=StatutCommande.EN_ATTENTE_PAIEMENT)
+            .filter(date_creation__gte=debut_jour, date_creation__lt=fin_jour)
+            .count()
+        )
         nom_jour = jours_semaine_fr[debut_jour.weekday()]
         valeurs_jours.append((nom_jour, debut_jour.strftime("%d %b"), nb_cmd))
 

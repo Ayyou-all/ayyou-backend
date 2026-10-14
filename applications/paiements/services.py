@@ -73,7 +73,7 @@ def initier_demande_paiement_paytech(
     if url_annulation_client and url_annulation_client.startswith("https://") and "localhost" not in url_annulation_client and "127.0.0.1" not in url_annulation_client:
         cancel_url = url_annulation_client
     else:
-        cancel_url = "https://ayyou.sn/panier"
+        cancel_url = f"https://ayyou.sn/commandes/suivi/{commande.id}?paiement=en_attente"
 
     payload = {
         "item_name": f"AYYOU - Commande {commande.reference}",

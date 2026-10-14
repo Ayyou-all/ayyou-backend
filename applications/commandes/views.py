@@ -121,6 +121,7 @@ class VueCommandesRestaurant(generics.ListAPIView):
         etablissement = obtenir_etablissement_du_gerant(self.request.user)
         queryset = (
             Commande.objects.filter(etablissement=etablissement)
+            .exclude(statut=StatutCommande.EN_ATTENTE_PAIEMENT)
             .select_related("client")
             .prefetch_related("lignes")
         )
