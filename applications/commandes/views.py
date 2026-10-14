@@ -22,7 +22,7 @@ from applications.communs.erreurs import AccesRefuse
 from applications.etablissements.services import obtenir_etablissement_du_gerant
 from applications.utilisateurs.permissions import EstClient, EstGerantEtablissement, EstLivreur
 
-from .models import Commande, HistoriqueStatutCommande
+from .models import Commande, HistoriqueStatutCommande, StatutCommande
 from .serializers import (
     SerializerActionAcceptation,
     SerializerActionRefus,
