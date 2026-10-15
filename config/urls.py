@@ -8,10 +8,21 @@ Documentation interactive OpenAPI / Swagger disponible sur `/api/docs/`.
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.http import JsonResponse
+from django.views.static import serve
+from django.urls import include, path, re_path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+
+def vue_sante(_requete):
+    """Point de contrôle de santé pour Docker et le reverse proxy."""
+    return JsonResponse({"statut": "operationnel", "service": "ayyou-backend"})
+
+
 urlpatterns = [
+    # Route de santé pour Docker
+    path("sante/", vue_sante, name="sante"),
+    path("api/sante/", vue_sante, name="api-sante"),
     # Administration native Django
     path("admin/", admin.site.urls),
     # Documentation OpenAPI / Swagger
@@ -31,8 +42,6 @@ urlpatterns = [
     path("api/notifications/", include("applications.notifications.urls")),
     path("api/administration/", include("applications.administration.urls")),
     path("api/ia/", include("applications.intelligence.urls")),
+    # Distribution des fichiers médias téléversés (photos de plats, logos, bannières)
+    re_path(r"^medias/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
 ]
-
-# En développement : distribution des fichiers médias téléversés
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

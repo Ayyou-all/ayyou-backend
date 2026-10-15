@@ -49,6 +49,10 @@ def recommander_plats_pour_client(utilisateur, budget_max: int = None, limite: i
             etablissement__statut_validation="ACTIF",
         )
         .select_related("etablissement", "categorie")
+        .annotate(
+            total_likes=Count("publications__mentions_jeaime", distinct=True),
+            total_commandes=Count("lignes_commande", distinct=True),
+        )
     )
 
     if budget_max:
@@ -138,6 +142,10 @@ def repondre_au_message_chatbot(message_texte: str, budget_fcfa: int = None, qua
             etablissement__statut_validation="ACTIF",
         )
         .select_related("etablissement", "categorie")
+        .annotate(
+            total_likes=Count("publications__mentions_jeaime", distinct=True),
+            total_commandes=Count("lignes_commande", distinct=True),
+        )
     )
 
     if budget_fcfa:
@@ -207,10 +215,34 @@ def obtenir_previsions_etablissement(utilisateur) -> dict:
     etablissement = obtenir_etablissement_du_gerant(utilisateur)
     jour_actuel = datetime.now().weekday()
 
+    # Agrégation des commandes réelles pour calculer l'historique des ventes par créneau
+    commandes_passees = Commande.objects.filter(
+        etablissement=etablissement,
+    ).exclude(statut__in=[StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.REFUSEE_ANNULEE])
+
+    ventes_agreg = {}
+    for c in commandes_passees:
+        dt = timezone.localtime(c.date_creation)
+        cle = (dt.weekday(), dt.hour)
+        if cle not in ventes_agreg:
+            ventes_agreg[cle] = {"quantite_commandes": 0, "chiffre_affaires_fcfa": 0}
+        ventes_agreg[cle]["quantite_commandes"] += 1
+        ventes_agreg[cle]["chiffre_affaires_fcfa"] += (c.total_fcfa or 0)
+
+    historique_ventes = [
+        {
+            "jour_semaine": js,
+            "heure": h,
+            "quantite_commandes": d["quantite_commandes"],
+            "chiffre_affaires_fcfa": d["chiffre_affaires_fcfa"],
+        }
+        for (js, h), d in ventes_agreg.items()
+    ]
+
     payload = {
         "restaurant_id": etablissement.id,
         "nom_restaurant": etablissement.nom,
-        "historique_ventes": [],
+        "historique_ventes": historique_ventes,
         "jour_cible": jour_actuel,
     }
 

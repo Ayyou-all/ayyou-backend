@@ -110,7 +110,11 @@ def creer_commande_depuis_panier(
             if pid is not None and str(pid).isdigit():
                 pid = int(pid)
             if pid not in plats_db:
-                continue
+                raise ErreurMetier(
+                    f"Le plat ID {pid} n'existe pas ou n'appartient pas à cet établissement.",
+                    code="plat_invalide",
+                    details={"plat_id": pid},
+                )
             plat = plats_db[pid]
             if not plat.est_commandable:
                 raise ErreurMetier(
@@ -132,25 +136,10 @@ def creer_commande_depuis_panier(
             )
 
         if not lignes_a_creer:
-            # Si le panier stocké côté client contenait une référence ancienne, lier au plat actif du restaurant
-            premier_plat = Plat.objects.filter(etablissement=etablissement, est_disponible=True).first()
-            if premier_plat:
-                quantite = max(1, int(articles_payload[0].get("quantite", 1))) if articles_payload else 1
-                sous_total_fcfa = premier_plat.prix_fcfa * quantite
-                lignes_a_creer.append(
-                    {
-                        "plat": premier_plat,
-                        "nom_plat": premier_plat.nom,
-                        "prix_unitaire_fcfa": premier_plat.prix_fcfa,
-                        "quantite": quantite,
-                        "instructions_speciales": "",
-                    }
-                )
-            else:
-                raise ErreurMetier(
-                    "Aucun article valide trouvé pour cet établissement.",
-                    code="panier_vide",
-                )
+            raise ErreurMetier(
+                "Le panier ne contient aucun article valide pour cet établissement.",
+                code="panier_vide",
+            )
     else:
         lignes_panier = list(
             LignePanier.objects.select_for_update()

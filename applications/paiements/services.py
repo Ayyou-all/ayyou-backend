@@ -320,8 +320,7 @@ def verifier_statut_paytech_en_ligne(commande_id: int) -> TentativePaiement:
                 data = res.json()
                 payment = data.get("payment", {})
                 state = str(payment.get("state", "")).lower()
-                # Si payé ou si en environnement de test après retour du guichet
-                if state in ["completed", "success"] or (settings.PAYTECH_ENVIRONNEMENT == "test" and state != "canceled"):
+                if state in ["completed", "success"]:
                     tentative.statut = StatutPaiement.CONFIRME
                     tentative.date_confirmation = timezone.now()
                     tentative.save(update_fields=["statut", "date_confirmation"])
@@ -334,19 +333,11 @@ def verifier_statut_paytech_en_ligne(commande_id: int) -> TentativePaiement:
                             commentaire="Paiement mobile PayTech confirmé avec succès.",
                         )
                     return tentative
+                elif state in ["canceled", "cancelled"]:
+                    tentative.statut = StatutPaiement.ANNULE
+                    tentative.save(update_fields=["statut"])
+                    return tentative
         except Exception as e:
             logger.warning(f"Impossible de vérifier le statut PayTech en ligne : {e}")
-
-    # Fallback pour environnement de test PayTech
-    if settings.PAYTECH_ENVIRONNEMENT == "test" and tentative.commande.statut == StatutCommande.EN_ATTENTE_PAIEMENT:
-        tentative.statut = StatutPaiement.CONFIRME
-        tentative.date_confirmation = timezone.now()
-        tentative.save(update_fields=["statut", "date_confirmation"])
-        transitionner_statut_commande(
-            commande=tentative.commande,
-            nouveau_statut=StatutCommande.CREEE_EN_ATTENTE,
-            auteur=None,
-            commentaire="Paiement PayTech validé (environnement de test).",
-        )
 
     return tentative
