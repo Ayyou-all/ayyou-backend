@@ -15,13 +15,17 @@ class SerializerUtilisateur(serializers.ModelSerializer):
     adresse_photo = serializers.SerializerMethodField()
     nom_etablissement = serializers.SerializerMethodField()
     type_vehicule = serializers.SerializerMethodField()
+    nom_vehicule = serializers.SerializerMethodField()
+    immatriculation = serializers.SerializerMethodField()
+    zone_principale = serializers.SerializerMethodField()
     est_actif = serializers.BooleanField(source="is_active", read_only=True)
 
     class Meta:
         model = Utilisateur
         fields = [
             "id", "prenom", "nom", "courriel", "telephone", "role", "adresse", "adresse_photo",
-            "preferences_alimentaires", "nom_etablissement", "type_vehicule", "est_actif", "date_creation",
+            "preferences_alimentaires", "nom_etablissement", "type_vehicule", "nom_vehicule",
+            "immatriculation", "zone_principale", "est_actif", "date_creation",
         ]
         read_only_fields = ["id", "courriel", "role", "est_actif", "date_creation"]
 
@@ -35,6 +39,18 @@ class SerializerUtilisateur(serializers.ModelSerializer):
     def get_type_vehicule(self, utilisateur):
         profil = getattr(utilisateur, "profil_livreur", None)
         return profil.type_vehicule if profil else None
+
+    def get_nom_vehicule(self, utilisateur):
+        profil = getattr(utilisateur, "profil_livreur", None)
+        return profil.nom_vehicule if profil else None
+
+    def get_immatriculation(self, utilisateur):
+        profil = getattr(utilisateur, "profil_livreur", None)
+        return profil.immatriculation if profil else None
+
+    def get_zone_principale(self, utilisateur):
+        profil = getattr(utilisateur, "profil_livreur", None)
+        return profil.zone_principale if profil else None
 
 
 class SerializerModificationProfil(serializers.ModelSerializer):

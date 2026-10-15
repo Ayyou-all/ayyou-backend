@@ -184,13 +184,21 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
 
 class SerializerProfilLivreur(serializers.ModelSerializer):
     nom_complet = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    nomComplet = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
     prenom = serializers.CharField(source="utilisateur.prenom", read_only=True)
     nom = serializers.CharField(source="utilisateur.nom", read_only=True)
     courriel = serializers.EmailField(source="utilisateur.courriel", read_only=True)
     telephone = serializers.CharField(source="utilisateur.telephone", read_only=True)
     adresse = serializers.CharField(source="utilisateur.adresse", read_only=True)
     adresse_photo = serializers.SerializerMethodField()
+    adressePhoto = serializers.SerializerMethodField()
+    typeVehicule = serializers.CharField(source="type_vehicule", read_only=True)
+    nomVehicule = serializers.CharField(source="nom_vehicule", read_only=True)
+    zonePrincipale = serializers.CharField(source="zone_principale", read_only=True)
+    statutValidation = serializers.CharField(source="statut_validation", read_only=True)
     est_disponible = serializers.SerializerMethodField()
+    estDisponible = serializers.SerializerMethodField()
+    documents = serializers.SerializerMethodField()
     gains_du_jour_fcfa = serializers.SerializerMethodField()
     nombre_livraisons_jour = serializers.SerializerMethodField()
     gains_semaine = serializers.SerializerMethodField()
@@ -202,19 +210,27 @@ class SerializerProfilLivreur(serializers.ModelSerializer):
         fields = [
             "id",
             "nom_complet",
+            "nomComplet",
             "prenom",
             "nom",
             "courriel",
             "telephone",
             "adresse",
             "adresse_photo",
+            "adressePhoto",
             "type_vehicule",
+            "typeVehicule",
             "nom_vehicule",
+            "nomVehicule",
             "immatriculation",
             "zone_principale",
+            "zonePrincipale",
             "disponibilite",
             "est_disponible",
+            "estDisponible",
             "statut_validation",
+            "statutValidation",
+            "documents",
             "gains_du_jour_fcfa",
             "nombre_livraisons_jour",
             "gains_semaine",
@@ -227,8 +243,18 @@ class SerializerProfilLivreur(serializers.ModelSerializer):
     def get_adresse_photo(self, obj):
         return construire_url_absolue(self.context.get("request"), obj.utilisateur.photo)
 
+    def get_adressePhoto(self, obj):
+        return self.get_adresse_photo(obj)
+
     def get_est_disponible(self, obj):
         return obj.disponibilite == DisponibiliteLivreur.EN_LIGNE
+
+    def get_estDisponible(self, obj):
+        return self.get_est_disponible(obj)
+
+    def get_documents(self, obj):
+        from applications.utilisateurs.serializers import SerializerDocumentJustificatif
+        return SerializerDocumentJustificatif(obj.utilisateur.documents.all(), many=True, context=self.context).data
 
     def get_gains_du_jour_fcfa(self, obj):
         from django.utils import timezone

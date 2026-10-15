@@ -297,6 +297,23 @@ class VueMonProfilLivreur(APIView):
         if profil_modifie:
             profil.save()
 
+        # 3. Téléversement éventuel de documents justificatifs (Permis recto / verso)
+        from applications.utilisateurs.models import DocumentJustificatif, TypeDocument, StatutDocument
+        if "permis_recto" in request.FILES:
+            DocumentJustificatif.objects.create(
+                proprietaire=user,
+                type_document=TypeDocument.PERMIS_CONDUIRE,
+                fichier=request.FILES["permis_recto"],
+                statut=StatutDocument.EN_ATTENTE,
+            )
+        if "permis_verso" in request.FILES:
+            DocumentJustificatif.objects.create(
+                proprietaire=user,
+                type_document=TypeDocument.PERMIS_CONDUIRE,
+                fichier=request.FILES["permis_verso"],
+                statut=StatutDocument.EN_ATTENTE,
+            )
+
         return Response(SerializerProfilLivreur(profil, context={"request": request}).data)
 
     def put(self, request):

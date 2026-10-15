@@ -48,6 +48,9 @@ def creer_compte(donnees: dict) -> Utilisateur:
         role=role,
         adresse=donnees.get("adresse", ""),
     )
+    if donnees.get("photo"):
+        utilisateur.photo = donnees["photo"]
+        utilisateur.save(update_fields=["photo"])
 
     if role == Role.RESTAURANT:
         nom_etablissement = donnees["nom_etablissement"].strip()
@@ -77,7 +80,13 @@ def creer_compte(donnees: dict) -> Utilisateur:
             )
 
     elif role == Role.LIVREUR:
-        ProfilLivreur.objects.create(utilisateur=utilisateur, type_vehicule=donnees["type_vehicule"])
+        ProfilLivreur.objects.create(
+            utilisateur=utilisateur,
+            type_vehicule=donnees.get("type_vehicule") or "MOTO",
+            nom_vehicule=donnees.get("nom_vehicule", "").strip(),
+            immatriculation=donnees.get("immatriculation", "").strip(),
+            zone_principale=donnees.get("zone_principale", "").strip(),
+        )
 
         # Enregistrement des documents du livreur (permis recto/verso)
         if donnees.get("permis_recto"):
