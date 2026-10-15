@@ -98,11 +98,35 @@ class SerializerPropositionLivraison(serializers.Serializer):
     def get_comptoirRetrait(self, commande):
         return f"Guichet AYYOU - {commande.etablissement.nom}"
 
+    def _calculer_distance_reelle_km(self, commande):
+        try:
+            import math
+            lat1 = float(self.get_restaurantLatitude(commande))
+            lon1 = float(self.get_restaurantLongitude(commande))
+            lat2 = float(self.get_clientLatitude(commande))
+            lon2 = float(self.get_clientLongitude(commande))
+
+            # Formule de Haversine
+            r = 6371.0  # Rayon terrestre moyen en kilomètres
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = (
+                math.sin(dlat / 2.0) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(dlon / 2.0) ** 2
+            )
+            c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+            distance = round(r * c, 1)
+            return max(0.5, distance)
+        except Exception:
+            return 2.5
+
     def get_distanceKm(self, commande):
-        return 2.5
+        return self._calculer_distance_reelle_km(commande)
 
     def get_distance_km(self, commande):
-        return 2.5
+        return self._calculer_distance_reelle_km(commande)
 
     def get_gainFcfa(self, commande):
         frais = commande.frais_livraison_fcfa if commande.frais_livraison_fcfa else 1500
@@ -112,10 +136,12 @@ class SerializerPropositionLivraison(serializers.Serializer):
         return self.get_gainFcfa(commande)
 
     def get_tempsTrajetMin(self, commande):
-        return 10
+        distance = self._calculer_distance_reelle_km(commande)
+        # Estimation de trajet moto à Dakar (~25 km/h de moyenne + 5 min récupération / remise)
+        return max(5, round((distance / 25.0) * 60 + 5))
 
     def get_temps_trajet_minutes(self, commande):
-        return 10
+        return self.get_tempsTrajetMin(commande)
 
     def get_articles(self, commande):
         return SerializerArticleVerification(commande.lignes.all(), many=True).data
