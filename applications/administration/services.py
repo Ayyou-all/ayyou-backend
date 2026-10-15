@@ -232,7 +232,7 @@ def calculer_statistiques_globales(request=None) -> dict:
             "iconeOuPhoto": photo_url if photo_url else "fa-solid fa-motorcycle",
             "estPhoto": bool(photo_url),
             "classeFondIcone": "bg-amber-50 text-amber-600",
-            "dateInscription": liv.date_creation.strftime("%d %b. %Y") if hasattr(liv, "date_creation") and liv.date_creation else "Récemment",
+            "dateInscription": liv.utilisateur.date_creation.strftime("%d %b. %Y") if hasattr(liv, "utilisateur") and getattr(liv.utilisateur, "date_creation", None) else "Récemment",
             "statut": "EN_ATTENTE",
         })
 

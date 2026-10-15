@@ -132,7 +132,9 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
         return SerializerDocumentJustificatif(docs, many=True, context=self.context).data
 
     def get_totalLivraisons(self, obj):
-        return obj.missions_livraison.count()
+        if hasattr(obj, "livraisons"):
+            return obj.livraisons.count()
+        return 0
 
     def get_noteMoyenne(self, obj):
         return 4.9
