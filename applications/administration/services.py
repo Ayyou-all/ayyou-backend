@@ -248,6 +248,44 @@ def calculer_statistiques_globales(request=None) -> dict:
             "pourcentageBarre": max(int((r.nb_commandes / max_top_cmd) * 100), 15) if max_top_cmd > 0 else 20,
         })
 
+    # 4. Répartition réelle des commandes par catégorie
+    from applications.commandes.models import LigneCommande
+    categories_qs = (
+        LigneCommande.objects.filter(plat__categorie__isnull=False)
+        .values("plat__categorie__nom")
+        .annotate(total=Count("id"))
+        .order_by("-total")[:4]
+    )
+    total_lignes_cat = sum(c["total"] for c in categories_qs) or 1
+    couleurs_cat = ["#E51824", "#1e293b", "#475569", "#cbd5e1"]
+    commandes_par_categorie = []
+    circonference = 238
+    offset_courant = 0
+    for idx, c in enumerate(categories_qs):
+        pourcentage = int(round((c["total"] / total_lignes_cat) * 100))
+        dash_len = int(round((c["total"] / total_lignes_cat) * circonference))
+        commandes_par_categorie.append({
+            "nom": c["plat__categorie__nom"],
+            "total": c["total"],
+            "pourcentage": pourcentage,
+            "dasharray": f"{dash_len} {circonference}",
+            "dashoffset": str(-offset_courant),
+            "couleur": couleurs_cat[idx % len(couleurs_cat)],
+        })
+        offset_courant += dash_len
+
+    if not commandes_par_categorie:
+        commandes_par_categorie = [
+            {
+                "nom": "Plats locaux",
+                "total": total_commandes,
+                "pourcentage": 100,
+                "dasharray": "238 238",
+                "dashoffset": "0",
+                "couleur": "#E51824",
+            }
+        ]
+
     return {
         # Formats camelCase et snake_case pour rétrocompatibilité totale
         "totalCommandes": total_commandes,
@@ -268,6 +306,7 @@ def calculer_statistiques_globales(request=None) -> dict:
         "partenairesEnAttente": partenaires_en_attente,
         "nombre_partenaires_en_attente": partenaires_en_attente,
         "commandesParJour": commandes_par_jour,
+        "commandesParCategorie": commandes_par_categorie,
         "dernieresValidations": dernieres_validations,
         "topRestaurants": top_restaurants,
     }

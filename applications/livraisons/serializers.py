@@ -53,7 +53,47 @@ class SerializerPropositionLivraison(serializers.Serializer):
     temps_restant_secondes = serializers.IntegerField(default=30)
     tempsTrajetMin = serializers.SerializerMethodField()
     temps_trajet_minutes = serializers.SerializerMethodField()
+    restaurantLatitude = serializers.SerializerMethodField()
+    restaurantLongitude = serializers.SerializerMethodField()
+    clientLatitude = serializers.SerializerMethodField()
+    clientLongitude = serializers.SerializerMethodField()
+    restaurant_latitude = serializers.SerializerMethodField()
+    restaurant_longitude = serializers.SerializerMethodField()
+    client_latitude = serializers.SerializerMethodField()
+    client_longitude = serializers.SerializerMethodField()
     articles = serializers.SerializerMethodField()
+
+    def get_restaurantLatitude(self, commande):
+        if commande.etablissement and commande.etablissement.latitude:
+            return float(commande.etablissement.latitude)
+        return 14.6710
+
+    def get_restaurantLongitude(self, commande):
+        if commande.etablissement and commande.etablissement.longitude:
+            return float(commande.etablissement.longitude)
+        return -17.4320
+
+    def get_clientLatitude(self, commande):
+        if commande.latitude_livraison:
+            return float(commande.latitude_livraison)
+        return 14.6850
+
+    def get_clientLongitude(self, commande):
+        if commande.longitude_livraison:
+            return float(commande.longitude_livraison)
+        return -17.4520
+
+    def get_restaurant_latitude(self, commande):
+        return self.get_restaurantLatitude(commande)
+
+    def get_restaurant_longitude(self, commande):
+        return self.get_restaurantLongitude(commande)
+
+    def get_client_latitude(self, commande):
+        return self.get_clientLatitude(commande)
+
+    def get_client_longitude(self, commande):
+        return self.get_clientLongitude(commande)
 
     def get_comptoirRetrait(self, commande):
         return f"Guichet AYYOU - {commande.etablissement.nom}"
@@ -90,6 +130,10 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
     client_telephone = serializers.CharField(source="commande.telephone_contact", read_only=True)
     client_adresse = serializers.CharField(source="commande.adresse_livraison", read_only=True)
     client_instructions = serializers.CharField(source="commande.instructions_livraison", read_only=True)
+    restaurant_latitude = serializers.SerializerMethodField()
+    restaurant_longitude = serializers.SerializerMethodField()
+    client_latitude = serializers.SerializerMethodField()
+    client_longitude = serializers.SerializerMethodField()
     articles = serializers.SerializerMethodField()
 
     class Meta:
@@ -106,9 +150,33 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
             "client_telephone",
             "client_adresse",
             "client_instructions",
+            "restaurant_latitude",
+            "restaurant_longitude",
+            "client_latitude",
+            "client_longitude",
             "articles",
             "date_assignation",
         ]
+
+    def get_restaurant_latitude(self, livraison):
+        if livraison.commande and livraison.commande.etablissement and livraison.commande.etablissement.latitude:
+            return float(livraison.commande.etablissement.latitude)
+        return 14.6710
+
+    def get_restaurant_longitude(self, livraison):
+        if livraison.commande and livraison.commande.etablissement and livraison.commande.etablissement.longitude:
+            return float(livraison.commande.etablissement.longitude)
+        return -17.4320
+
+    def get_client_latitude(self, livraison):
+        if livraison.commande and livraison.commande.latitude_livraison:
+            return float(livraison.commande.latitude_livraison)
+        return 14.6850
+
+    def get_client_longitude(self, livraison):
+        if livraison.commande and livraison.commande.longitude_livraison:
+            return float(livraison.commande.longitude_livraison)
+        return -17.4520
 
     def get_articles(self, livraison):
         return SerializerArticleVerification(livraison.commande.lignes.all(), many=True).data
