@@ -25,6 +25,12 @@ def obtenir_profil_livreur(utilisateur) -> ProfilLivreur:
     """Récupère le profil du livreur connecté."""
     profil = getattr(utilisateur, "profil_livreur", None)
     if profil is None:
+        if getattr(utilisateur, "role", None) == "LIVREUR" or getattr(utilisateur, "is_superuser", False):
+            profil, _ = ProfilLivreur.objects.get_or_create(
+                utilisateur=utilisateur,
+                defaults={"type_vehicule": "MOTO"}
+            )
+            return profil
         raise AccesRefuse("Aucun profil de livreur n'est associé à ce compte.")
     return profil
 
