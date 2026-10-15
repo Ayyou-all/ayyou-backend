@@ -1,0 +1,21 @@
+# Environnement Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets locaux (ne jamais versionner)
+.env
+
+# Base SQLite de développement et médias téléversés
+db.sqlite3
+db.sqlite3-journal
+medias/
+staticfiles/
+
+# Outils
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/

@@ -1,22 +1,38 @@
 """
-URL configuration for config project.
+Configuration des URLs principales du backend AYYOU.
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/6.0/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+Toutes les APIs REST sont préfixées par `/api/`.
+Documentation interactive OpenAPI / Swagger disponible sur `/api/docs/`.
 """
+
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    # Administration native Django
+    path("admin/", admin.site.urls),
+    # Documentation OpenAPI / Swagger
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    # Applications métier AYYOU
+    path("api/authentification/", include("applications.authentification.urls")),
+    path("api/utilisateurs/", include("applications.utilisateurs.urls")),
+    path("api/etablissements/", include("applications.etablissements.urls")),
+    path("api/", include("applications.catalogue.urls")),
+    path("api/panier/", include("applications.panier.urls")),
+    path("api/commandes/", include("applications.commandes.urls")),
+    path("api/paiements/", include("applications.paiements.urls")),
+    path("api/livraisons/", include("applications.livraisons.urls")),
+    path("api/publications/", include("applications.publications.urls")),
+    path("api/abonnements/", include("applications.abonnements.urls")),
+    path("api/notifications/", include("applications.notifications.urls")),
+    path("api/administration/", include("applications.administration.urls")),
+    path("api/ia/", include("applications.intelligence.urls")),
 ]
+
+# En développement : distribution des fichiers médias téléversés
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
