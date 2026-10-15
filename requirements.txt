@@ -1,0 +1,16 @@
+# Versions vérifiées et installées le 13/10/2026 avec Python 3.12.10
+Django==6.1.2
+djangorestframework==3.18.3
+djangorestframework_simplejwt==5.5.1
+drf-spectacular==0.30.0
+django-cors-headers==4.9.0
+pillow==12.3.0
+python-dotenv==1.2.4
+requests==2.34.2
+
+# Tests
+pytest==9.1.1
+pytest-django==4.14.0
+
+# PostgreSQL (à décommenter lors de la migration, voir docs/migration-postgresql.md)
+# psycopg[binary]==3.*
