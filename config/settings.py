@@ -39,7 +39,7 @@ if not SECRET_KEY:
     # Clé de développement uniquement : elle change à chaque installation si .env est absent.
     SECRET_KEY = "cle-developpement-non-securisee-a-remplacer"
 
-ALLOWED_HOSTS = ["*"] if DEBUG else lire_liste("AYYOU_HOTES_AUTORISES", "localhost,127.0.0.1")
+ALLOWED_HOSTS = ["*"] if DEBUG else lire_liste("AYYOU_HOTES_AUTORISES", "api.ayyou.site,ayyou.site,localhost,127.0.0.1,backend")
 
 # --- Applications -------------------------------------------------------------
 INSTALLED_APPS = [
@@ -204,7 +204,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:59942",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
-] + [origine for origine in lire_liste("AYYOU_ORIGINES_FRONTEND", "") if origine]
+] + [origine for origine in lire_liste("AYYOU_ORIGINES_FRONTEND", "https://ayyou.site,http://localhost:2401,http://127.0.0.1:2401") if origine]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://localhost:\d+$",
@@ -278,6 +278,15 @@ LOGGING = {
 }
 
 # --- Durcissement production --------------------------------------------------
+CSRF_TRUSTED_ORIGINS = [
+    origine
+    for origine in lire_liste(
+        "AYYOU_CSRF_ORIGINES",
+        "https://api.ayyou.site,https://ayyou.site,http://localhost:2401,http://127.0.0.1:2401,http://localhost:8888,http://127.0.0.1:8888",
+    )
+    if origine
+]
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
