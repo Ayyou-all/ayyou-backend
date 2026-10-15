@@ -8,9 +8,12 @@ pillow==12.3.0
 python-dotenv==1.2.4
 requests==2.34.2
 
+# Serveur d'application de production
+gunicorn==23.0.0
+
 # Tests
 pytest==9.1.1
 pytest-django==4.14.0
 
-# PostgreSQL (à décommenter lors de la migration, voir docs/migration-postgresql.md)
-# psycopg[binary]==3.*
+# Pilote PostgreSQL (permet la bascule immédiate vers PostgreSQL sans reconstruire l'image)
+psycopg[binary]>=3.1.18
