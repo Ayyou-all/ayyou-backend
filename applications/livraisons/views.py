@@ -219,11 +219,85 @@ class VueDisponibiliteLivreur(APIView):
         return Response({"disponibilite": profil.disponibilite})
 
 
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+
+
 class VueMonProfilLivreur(APIView):
     """Profil et statistiques de gains du jour."""
 
     permission_classes = [EstLivreur]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         profil = obtenir_profil_livreur(request.user)
         return Response(SerializerProfilLivreur(profil, context={"request": request}).data)
+
+    def patch(self, request):
+        profil = obtenir_profil_livreur(request.user)
+        user = request.user
+        data = request.data
+
+        # 1. Mise à jour des informations personnelles de l'utilisateur
+        utilisateur_modifie = False
+        champs_utilisateur = {
+            "prenom": data.get("prenom"),
+            "nom": data.get("nom"),
+            "telephone": data.get("telephone"),
+            "adresse": data.get("adresse"),
+        }
+        for champ, valeur in champs_utilisateur.items():
+            if valeur is not None:
+                setattr(user, champ, str(valeur).strip())
+                utilisateur_modifie = True
+
+        # Mise à jour de la photo de profil
+        if "photo" in request.FILES:
+            user.photo = request.FILES["photo"]
+            utilisateur_modifie = True
+
+        # Mise à jour du mot de passe
+        nouveau_mdp = data.get("nouveau_mot_de_passe") or data.get("nouveauMotDePasse") or data.get("mot_de_passe")
+        if nouveau_mdp:
+            nouveau_mdp = str(nouveau_mdp).strip()
+            if len(nouveau_mdp) < 6:
+                raise ErreurMetier("Le mot de passe doit comporter au moins 6 caractères.", code="mot_de_passe_court")
+
+            ancien_mdp = data.get("ancien_mot_de_passe") or data.get("ancienMotDePasse")
+            if ancien_mdp and not user.check_password(ancien_mdp):
+                raise ErreurMetier("L'ancien mot de passe saisi est incorrect.", code="ancien_mot_de_passe_invalide")
+
+            user.set_password(nouveau_mdp)
+            utilisateur_modifie = True
+
+        if utilisateur_modifie:
+            user.save()
+
+        # 2. Mise à jour des données spécifiques livreur (véhicule, immatriculation, zone)
+        profil_modifie = False
+        type_vehicule = data.get("type_vehicule") or data.get("typeVehicule")
+        if type_vehicule:
+            profil.type_vehicule = str(type_vehicule).upper().strip()
+            profil_modifie = True
+
+        nom_vehicule = data.get("nom_vehicule") or data.get("nomVehicule")
+        if nom_vehicule is not None:
+            profil.nom_vehicule = str(nom_vehicule).strip()
+            profil_modifie = True
+
+        immatriculation = data.get("immatriculation") or data.get("numeroPlaque")
+        if immatriculation is not None:
+            profil.immatriculation = str(immatriculation).strip()
+            profil_modifie = True
+
+        zone_principale = data.get("zone_principale") or data.get("zonePrincipale") or data.get("zoneActivite")
+        if zone_principale is not None:
+            profil.zone_principale = str(zone_principale).strip()
+            profil_modifie = True
+
+        if profil_modifie:
+            profil.save()
+
+        return Response(SerializerProfilLivreur(profil, context={"request": request}).data)
+
+    def put(self, request):
+        return self.patch(request)

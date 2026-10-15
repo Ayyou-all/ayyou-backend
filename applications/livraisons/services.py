@@ -31,19 +31,25 @@ def obtenir_profil_livreur(utilisateur) -> ProfilLivreur:
 
 def lister_courses_disponibles(profil_livreur: ProfilLivreur):
     """
-    Renvoie les commandes prêtes pour retrait et qui n'ont pas encore de livreur assigné.
-    Le livreur doit être validé par l'administration pour voir les courses.
+    Renvoie les commandes prêtes ou créées par un client qui n'ont pas encore de livreur assigné.
+    Le livreur doit être disponible (EN_LIGNE) pour recevoir les courses en temps réel.
     """
-    if not profil_livreur.peut_recevoir_courses:
+    if profil_livreur.disponibilite != DisponibiliteLivreur.EN_LIGNE:
         return Commande.objects.none()
 
+    statuts_eligibles = [
+        StatutCommande.PRETE_POUR_RETRAIT,
+        StatutCommande.EN_PREPARATION,
+        StatutCommande.CREEE_EN_ATTENTE,
+    ]
     return (
         Commande.objects.filter(
-            statut=StatutCommande.PRETE_POUR_RETRAIT,
+            statut__in=statuts_eligibles,
             livraison__isnull=True,
         )
         .select_related("etablissement", "client")
         .prefetch_related("lignes")
+        .order_by("-date_creation")
     )
 
 
@@ -53,13 +59,18 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     Action Livreur (T05) : Accepter la mission de livraison proposée.
     Passe la commande à COURSE_ASSIGNEE et le livreur à OCCUPE.
     """
-    if not profil_livreur.peut_recevoir_courses:
+    if profil_livreur.disponibilite != DisponibiliteLivreur.EN_LIGNE and profil_livreur.disponibilite != DisponibiliteLivreur.OCCUPE:
         raise ErreurMetier(
-            "Votre compte n'est pas actif ou vous n'êtes pas marqué comme disponible.",
+            "Vous n'êtes pas marqué comme disponible (En ligne).",
             code="livreur_non_disponible",
         )
 
-    if commande.statut != StatutCommande.PRETE_POUR_RETRAIT:
+    statuts_acceptables = [
+        StatutCommande.PRETE_POUR_RETRAIT,
+        StatutCommande.EN_PREPARATION,
+        StatutCommande.CREEE_EN_ATTENTE,
+    ]
+    if commande.statut not in statuts_acceptables:
         raise ErreurMetier(
             f"Cette course n'est plus disponible (statut : {commande.statut}).",
             code="course_indisponible",
@@ -69,6 +80,28 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
         if commande.livraison.livreur == profil_livreur:
             return commande.livraison
         raise ErreurMetier("Cette commande a déjà été assignée à un autre coursier.", code="course_deja_assignee")
+
+    # Si la commande est encore en attente ou préparation, faire les transitions vers PRETE_POUR_RETRAIT
+    if commande.statut == StatutCommande.CREEE_EN_ATTENTE:
+        transitionner_statut_commande(
+            commande=commande,
+            nouveau_statut=StatutCommande.EN_PREPARATION,
+            auteur=profil_livreur.utilisateur,
+            commentaire="Prise en charge de la commande pour préparation.",
+        )
+        transitionner_statut_commande(
+            commande=commande,
+            nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
+            auteur=profil_livreur.utilisateur,
+            commentaire="Commande prête pour retrait par le livreur.",
+        )
+    elif commande.statut == StatutCommande.EN_PREPARATION:
+        transitionner_statut_commande(
+            commande=commande,
+            nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
+            auteur=profil_livreur.utilisateur,
+            commentaire="Commande prête pour retrait par le livreur.",
+        )
 
     # Gain livreur : part des frais de livraison (ex: 80% des frais de livraison, minimum 1000 FCFA)
     gain_fcfa = max(int(commande.frais_livraison_fcfa * 0.8), 1000)
@@ -80,7 +113,7 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
         gain_livreur_fcfa=gain_fcfa,
     )
 
-    # Transition de la commande
+    # Transition de la commande vers COURSE_ASSIGNEE
     transitionner_statut_commande(
         commande=commande,
         nouveau_statut=StatutCommande.COURSE_ASSIGNEE,
