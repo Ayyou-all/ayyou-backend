@@ -222,6 +222,8 @@ class SerializerProfilLivreur(serializers.ModelSerializer):
             "details_quotidiens",
             "latitude",
             "longitude",
+            "numero_reversement",
+            "operateur_reversement",
         ]
 
     def get_adresse_photo(self, obj):

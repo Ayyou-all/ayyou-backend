@@ -99,6 +99,7 @@ class SerializerCommandeClient(serializers.ModelSerializer):
             "articles",
             "est_en_cours",
             "adresse_livraison",
+            "repere_livraison",
             "latitude_livraison",
             "longitude_livraison",
             "restaurant_latitude",
@@ -201,6 +202,7 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
             "client_nom",
             "client_telephone",
             "adresse_livraison",
+            "repere_livraison",
             "instructions_livraison",
             "sous_total_fcfa",
             "frais_livraison_fcfa",
@@ -228,41 +230,44 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
 
 
 class SerializerLigneCreation(serializers.Serializer):
-    plat_id = serializers.IntegerField(required=False, allow_null=True)
-    quantite = serializers.IntegerField(min_value=1, default=1)
-    instructions_speciales = serializers.CharField(required=False, allow_blank=True, default="")
+    plat_id = serializers.IntegerField()
+    quantite = serializers.IntegerField(min_value=1, max_value=50, default=1)
+    instructions_speciales = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
 
 
-class SerializerCreationCommande(serializers.Serializer):
+class SerializerPositionLivraison(serializers.Serializer):
+    """Position de livraison OBLIGATOIRE : elle sert au contrôle de zone et au calcul des frais."""
+
+    latitude_livraison = serializers.FloatField(min_value=-90, max_value=90)
+    longitude_livraison = serializers.FloatField(min_value=-180, max_value=180)
+
+    def validate(self, attrs):
+        from applications.livraisons.tarification import valider_eligibilite_zone_livraison
+
+        attrs["latitude_livraison"] = round(attrs["latitude_livraison"], 6)
+        attrs["longitude_livraison"] = round(attrs["longitude_livraison"], 6)
+        valider_eligibilite_zone_livraison(attrs["latitude_livraison"], attrs["longitude_livraison"])
+        return attrs
+
+
+class SerializerEstimationCommande(SerializerPositionLivraison):
+    """Calcul des montants exacts avant paiement (aucune commande n'est créée)."""
+
+    etablissement_id = serializers.IntegerField()
+    articles = SerializerLigneCreation(many=True, allow_empty=False)
+
+
+class SerializerCreationCommande(SerializerPositionLivraison):
     """Payload envoyé par le client pour transformer son panier en commande."""
 
     etablissement_id = serializers.IntegerField()
     adresse_livraison = serializers.CharField(max_length=255)
-    telephone_contact = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    repere_livraison = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    telephone_contact = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
     instructions_livraison = serializers.CharField(required=False, allow_blank=True, default="")
     mode_paiement = serializers.ChoiceField(choices=ModePaiement.choices, default=ModePaiement.WAVE)
-    latitude_livraison = serializers.FloatField(required=False, allow_null=True)
-    longitude_livraison = serializers.FloatField(required=False, allow_null=True)
     source_video_id = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     articles = SerializerLigneCreation(many=True, required=False)
-
-    def validate_latitude_livraison(self, value):
-        if value is not None:
-            return round(float(value), 6)
-        return value
-
-    def validate_longitude_livraison(self, value):
-        if value is not None:
-            return round(float(value), 6)
-        return value
-
-    def validate(self, attrs):
-        lat = attrs.get("latitude_livraison")
-        lng = attrs.get("longitude_livraison")
-        if lat is not None and lng is not None:
-            from applications.livraisons.tarification import valider_eligibilite_zone_livraison
-            valider_eligibilite_zone_livraison(lat, lng)
-        return attrs
 
 
 class SerializerActionAcceptation(serializers.Serializer):

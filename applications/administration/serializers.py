@@ -26,7 +26,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
     emailGerant = serializers.CharField(source="gerant.courriel", read_only=True)
     telephoneGerant = serializers.CharField(source="gerant.telephone", read_only=True)
     totalCommandes = serializers.SerializerMethodField()
-    noteMoyenne = serializers.SerializerMethodField()
     adresse_logo = serializers.SerializerMethodField()
     adresse_couverture = serializers.SerializerMethodField()
 
@@ -51,7 +50,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
             "emailGerant",
             "telephoneGerant",
             "totalCommandes",
-            "noteMoyenne",
             "documents",
             "platsMenu",
             "adresse_logo",
@@ -68,7 +66,7 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
         return [
             {
                 "nom": p.nom,
-                "description": p.description or "Plat signature préparé avec des produits frais.",
+                "description": p.description,
                 "prix": p.prix_fcfa,
             }
             for p in obj.plats.filter(est_archive=False)[:10]
@@ -83,9 +81,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
     def get_totalCommandes(self, obj):
         return obj.commandes_etablissement.count()
 
-    def get_noteMoyenne(self, obj):
-        return 4.8
-
 
 class SerializerLivreurModeration(serializers.ModelSerializer):
     """Présentation d'un coursier pour modération et gestion globale superadmin."""
@@ -96,7 +91,7 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
     telephone = serializers.CharField(source="utilisateur.telephone", read_only=True)
     dateInscription = serializers.DateTimeField(source="utilisateur.date_creation", read_only=True)
     totalLivraisons = serializers.SerializerMethodField()
-    noteMoyenne = serializers.SerializerMethodField()
+    livraisonsAujourdhui = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
 
     class Meta:
@@ -115,7 +110,7 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
             "email",
             "telephone",
             "totalLivraisons",
-            "noteMoyenne",
+            "livraisonsAujourdhui",
             "photo",
             "documents",
         ]
@@ -132,12 +127,13 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
         return SerializerDocumentJustificatif(docs, many=True, context=self.context).data
 
     def get_totalLivraisons(self, obj):
-        if hasattr(obj, "livraisons"):
-            return obj.livraisons.count()
-        return 0
+        """Nombre de livraisons réellement terminées (PIN validé)."""
+        return obj.livraisons.filter(etape="LIVREE").count()
 
-    def get_noteMoyenne(self, obj):
-        return 4.9
+    def get_livraisonsAujourdhui(self, obj):
+        from django.utils import timezone
+
+        return obj.livraisons.filter(etape="LIVREE", date_livraison__date=timezone.localdate()).count()
 
 
 class SerializerArticleCommandeAdmin(serializers.Serializer):
