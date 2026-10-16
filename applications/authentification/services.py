@@ -203,6 +203,11 @@ Plateforme culinaire et de livraison à Dakar
     """
 
     try:
+        if "console" in settings.EMAIL_BACKEND.lower():
+            logger.warning(
+                f"[CODE VERIFICATION - MODE CONSOLE] Destinataire : {courriel} | CODE : {code} | "
+                "Mode console actif (AYYOU_EMAIL_HOST_USER non configuré ou .env non chargé)."
+            )
         send_mail(
             subject=sujet,
             message=corps_texte,
@@ -211,6 +216,8 @@ Plateforme culinaire et de livraison à Dakar
             recipient_list=[courriel],
             fail_silently=False,
         )
+        if "console" not in settings.EMAIL_BACKEND.lower():
+            logger.info(f"[CODE VERIFICATION - SMTP REEL] Code de vérification envoyé à {courriel}")
     except Exception as exc:
         logger.error(f"Échec envoi code email SMTP à {courriel} : {exc}", exc_info=True)
         detail_erreur = str(exc)

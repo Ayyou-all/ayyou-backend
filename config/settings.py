@@ -239,28 +239,32 @@ URL_FRONTEND = os.getenv("AYYOU_URL_FRONTEND", "http://localhost:4200")
 URL_PUBLIQUE_BACKEND = os.getenv("AYYOU_URL_PUBLIQUE_BACKEND", "http://localhost:8000")
 
 # --- Envoi d'e-mails (SMTP réel avec variables d'environnement) ---------------
-EMAIL_BACKEND = os.getenv(
-    "AYYOU_EMAIL_BACKEND",
-    "django.core.mail.backends.smtp.EmailBackend"
-    if os.getenv("AYYOU_EMAIL_HOST_USER")
-    else "django.core.mail.backends.console.EmailBackend",
-)
-EMAIL_HOST = os.getenv("AYYOU_EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("AYYOU_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = (os.getenv("AYYOU_EMAIL_HOST_USER") or os.getenv("EMAIL_HOST_USER") or "").strip()
+EMAIL_HOST_PASSWORD = (os.getenv("AYYOU_EMAIL_HOST_PASSWORD") or os.getenv("EMAIL_HOST_PASSWORD") or "").strip("\"' ")
+EMAIL_HOST = os.getenv("AYYOU_EMAIL_HOST") or os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("AYYOU_EMAIL_PORT") or os.getenv("EMAIL_PORT", "465"))
 
 # Configuration automatique TLS / SSL selon le port utilisé
 if EMAIL_PORT == 465:
-    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", True)
-    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", False)
+    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", lire_booleen("EMAIL_USE_SSL", True))
+    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", lire_booleen("EMAIL_USE_TLS", False))
 else:
-    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", True)
-    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", False)
+    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", lire_booleen("EMAIL_USE_TLS", True))
+    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", lire_booleen("EMAIL_USE_SSL", False))
 
-EMAIL_TIMEOUT = int(os.getenv("AYYOU_EMAIL_TIMEOUT", "10"))
-EMAIL_HOST_USER = os.getenv("AYYOU_EMAIL_HOST_USER", "").strip()
-EMAIL_HOST_PASSWORD = os.getenv("AYYOU_EMAIL_HOST_PASSWORD", "").strip("\"' ")
+EMAIL_TIMEOUT = int(os.getenv("AYYOU_EMAIL_TIMEOUT", os.getenv("EMAIL_TIMEOUT", "10")))
 
-_default_from_env = os.getenv("AYYOU_DEFAULT_FROM_EMAIL")
+EMAIL_BACKEND = os.getenv(
+    "AYYOU_EMAIL_BACKEND",
+    os.getenv(
+        "EMAIL_BACKEND",
+        "django.core.mail.backends.smtp.EmailBackend"
+        if EMAIL_HOST_USER
+        else "django.core.mail.backends.console.EmailBackend",
+    ),
+)
+
+_default_from_env = os.getenv("AYYOU_DEFAULT_FROM_EMAIL") or os.getenv("DEFAULT_FROM_EMAIL")
 if _default_from_env:
     DEFAULT_FROM_EMAIL = _default_from_env
 elif EMAIL_HOST_USER:
