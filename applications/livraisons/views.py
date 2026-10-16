@@ -188,17 +188,28 @@ class VuePositionGpsLivreur(APIView):
 
     permission_classes = [EstLivreur]
 
+    def post(self, request):
+        return self.patch(request)
+
     def patch(self, request):
         profil = obtenir_profil_livreur(request.user)
         serializer = SerializerMiseAJourPosition(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        lat = float(serializer.validated_data["latitude"])
+        lng = float(serializer.validated_data["longitude"])
+
         mettre_a_jour_position_gps(
             profil_livreur=profil,
-            latitude=serializer.validated_data["latitude"],
-            longitude=serializer.validated_data["longitude"],
+            latitude=lat,
+            longitude=lng,
         )
-        return Response({"succes": True})
+        return Response({
+            "succes": True,
+            "latitude": lat,
+            "longitude": lng,
+            "date_derniere_position": profil.date_derniere_position.isoformat() if profil.date_derniere_position else None,
+        })
 
 
 class VueDisponibiliteLivreur(APIView):

@@ -105,6 +105,11 @@ class SerializerCommandeClient(serializers.ModelSerializer):
             "restaurant_longitude",
             "mode_paiement",
             "source_video_id",
+            "date_creation",
+            "heure_debut_preparation",
+            "heure_fin_preparation",
+            "heure_depart_livraison",
+            "heure_livraison_effective",
         ]
 
     def get_adresse_image_restaurant(self, obj):
@@ -129,12 +134,14 @@ class SerializerCommandeClient(serializers.ModelSerializer):
 
     def get_code_livraison(self, obj):
         """
-        Renvoie la liste des 4 chiffres (ex: [4, 8, 2, 5]) conforme au composant SuiviCommande.
+        Renvoie la liste des 4 chiffres (ex: [0, 3, 8, 5]) conforme au composant SuiviCommande.
+        Uniquement accessible au client propriétaire de la commande et aux administrateurs.
         """
         user = self.context.get("request").user if self.context.get("request") else None
-        # Le code PIN n'est visible que par le client propriétaire de la commande et l'admin
         if user and (user.is_superuser or user.id == obj.client_id):
-            return [int(chiffre) for chiffre in str(obj.code_livraison_pin).zfill(4)]
+            pin_str = str(obj.code_livraison_pin or "").strip()
+            if len(pin_str) == 4 and pin_str.isdigit():
+                return [int(chiffre) for chiffre in pin_str]
         return None
 
     def get_etape_suivi(self, obj):
@@ -164,13 +171,15 @@ class SerializerCommandeClient(serializers.ModelSerializer):
         profil = livraison.livreur
         u = profil.utilisateur
         req = self.context.get("request")
+        derniere_maj = profil.date_derniere_position.isoformat() if profil.date_derniere_position else None
         return {
             "nom": u.nom_complet,
             "vehicule": profil.nom_vehicule or profil.get_type_vehicule_display(),
             "adressePhoto": construire_url_absolue(req, u.photo) or "",
             "numeroTelephone": u.telephone,
-            "latitude": float(profil.latitude) if profil.latitude else 14.7167,
-            "longitude": float(profil.longitude) if profil.longitude else -17.4677,
+            "latitude": float(profil.latitude) if profil.latitude is not None else None,
+            "longitude": float(profil.longitude) if profil.longitude is not None else None,
+            "dateDernierePosition": derniere_maj,
         }
 
 
