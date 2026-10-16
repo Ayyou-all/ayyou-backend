@@ -48,8 +48,14 @@ class ProfilLivreur(models.Model):
         return f"Livreur {self.utilisateur.nom_complet}"
 
     @property
+    def est_valide(self) -> bool:
+        """Compte actif ET profil validé par l'administration (ni suspendu, ni banni)."""
+        return self.utilisateur.is_active and self.statut_validation == StatutValidationPartenaire.ACTIF
+
+    @property
     def peut_recevoir_courses(self) -> bool:
-        return self.statut_validation == StatutValidationPartenaire.ACTIF and self.disponibilite == DisponibiliteLivreur.EN_LIGNE
+        """Règle de dispatch : seul un livreur validé ET en ligne reçoit des propositions."""
+        return self.est_valide and self.disponibilite == DisponibiliteLivreur.EN_LIGNE
 
 
 class EtapeLivraison(models.TextChoices):

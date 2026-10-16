@@ -1,12 +1,9 @@
 """
 Vues HTTP pour l'espace Livreur AYYOU.
 
-Prend en charge :
-- Consultation des courses disponibles et acceptation
-- Navigation de mission étape par étape (guichet restaurant, trajet client)
-- Pointage des articles emballés
-- Clôture par code PIN de sécurité à 4 chiffres
-- Suivi GPS et gestion de la disponibilité en ligne
+Les vues restent minces : elles lisent la requête, appellent un service
+(`services.py`) qui applique les règles métier, puis renvoient la réponse.
+Chaque action porte uniquement sur la livraison du livreur connecté.
 """
 
 from django.shortcuts import get_object_or_404
@@ -14,12 +11,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from applications.commandes.models import Commande, StatutCommande
-from applications.commandes.services import valider_reception_client_par_pin
+from applications.commandes.models import Commande
 from applications.communs.erreurs import ErreurMetier
+from applications.communs.fichiers import valider_document, valider_image
 from applications.utilisateurs.permissions import EstLivreur
 
-from .models import DisponibiliteLivreur, EtapeLivraison, Livraison
+from .models import TypeVehicule
 from .serializers import (
     SerializerChangementDisponibilite,
     SerializerLivraisonEnCours,
@@ -27,12 +24,17 @@ from .serializers import (
     SerializerPointageArticle,
     SerializerProfilLivreur,
     SerializerPropositionLivraison,
+    SerializerValidationPinLivreur,
 )
 from .services import (
     accepter_mission_livraison,
+    changer_disponibilite,
     demarrer_trajet_vers_client,
+    exiger_livraison_active,
     lister_courses_disponibles,
+    livraison_est_bloquee,
     mettre_a_jour_position_gps,
+    obtenir_livraison_active,
     obtenir_profil_livreur,
     pointer_article_au_guichet,
     signaler_arrivee_domicile_client,
@@ -40,8 +42,16 @@ from .services import (
 )
 
 
+def trouver_commande(identifiant) -> Commande:
+    """Retrouve une commande par son id numérique ou sa référence (ex : ORD-7K2P9QXA)."""
+    identifiant = str(identifiant).strip().lstrip("#")
+    if identifiant.isdigit():
+        return get_object_or_404(Commande, pk=int(identifiant))
+    return get_object_or_404(Commande, reference=identifiant)
+
+
 class VuePropositionsCourses(APIView):
-    """Liste des courses prêtes à être acceptées par un coursier disponible."""
+    """Courses prêtes à être acceptées. Vide si le livreur n'est pas validé ou pas en ligne."""
 
     permission_classes = [EstLivreur]
 
@@ -52,66 +62,48 @@ class VuePropositionsCourses(APIView):
 
 
 class VueAccepterMission(APIView):
-    """Le coursier accepte la course dans les 30 secondes."""
+    """Le livreur accepte une course : le serveur verrouille la commande et choisit le gagnant."""
 
     permission_classes = [EstLivreur]
 
     def post(self, request, commande_id):
         profil = obtenir_profil_livreur(request.user)
-        if str(commande_id).isdigit():
-            commande = Commande.objects.filter(pk=int(commande_id)).first()
-        else:
-            ref = str(commande_id).lstrip("#")
-            commande = Commande.objects.filter(reference=ref).first()
-            if not commande:
-                commande = Commande.objects.filter(reference=commande_id).first()
-        if not commande:
-            commande = get_object_or_404(Commande, pk=commande_id)
-
-        livraison = accepter_mission_livraison(commande, profil)
+        livraison = accepter_mission_livraison(trouver_commande(commande_id), profil)
         return Response(SerializerLivraisonEnCours(livraison).data, status=status.HTTP_201_CREATED)
 
 
 class VueMissionEnCours(APIView):
-    """Détail de la course active actuellement prise en charge par le livreur."""
+    """Détail de la course active du livreur connecté."""
 
     permission_classes = [EstLivreur]
 
     def get(self, request):
         profil = obtenir_profil_livreur(request.user)
-        livraison_active = (
-            Livraison.objects.filter(livreur=profil)
-            .exclude(etape__in=[EtapeLivraison.LIVREE, EtapeLivraison.ECHOUEE])
-            .select_related("commande", "commande__etablissement", "commande__client")
-            .prefetch_related("commande__lignes")
-            .first()
-        )
-        if livraison_active is None:
+        livraison = obtenir_livraison_active(profil)
+        if livraison is None:
             return Response({"mission_active": False, "message": "Aucune course active pour le moment."})
-
-        return Response({"mission_active": True, "livraison": SerializerLivraisonEnCours(livraison_active).data})
+        return Response({
+            "mission_active": True,
+            "livraison": SerializerLivraisonEnCours(livraison).data,
+            "est_bloquee": livraison_est_bloquee(livraison),
+        })
 
 
 class VuePointerArticle(APIView):
-    """Le coursier coche un article au comptoir lors de la vérification."""
+    """Le livreur coche un article au comptoir lors de la vérification."""
 
     permission_classes = [EstLivreur]
 
     def post(self, request):
-        profil = obtenir_profil_livreur(request.user)
         serializer = SerializerPointageArticle(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        livraison_active = Livraison.objects.filter(livreur=profil).exclude(etape=EtapeLivraison.LIVREE).first()
-        if not livraison_active:
-            raise ErreurMetier("Aucune livraison active.", code="aucune_livraison")
-
-        ligne_maj = pointer_article_au_guichet(
-            livraison=livraison_active,
+        livraison = exiger_livraison_active(obtenir_profil_livreur(request.user))
+        ligne = pointer_article_au_guichet(
+            livraison=livraison,
             ligne_id=serializer.validated_data["ligne_id"],
             est_verifie=serializer.validated_data["est_verifie"],
         )
-        return Response({"ligne_id": ligne_maj.id, "est_verifie": ligne_maj.est_verifie_par_livreur})
+        return Response({"ligne_id": ligne.id, "est_verifie": ligne.est_verifie_par_livreur})
 
 
 class VueDepartVersClient(APIView):
@@ -120,71 +112,41 @@ class VueDepartVersClient(APIView):
     permission_classes = [EstLivreur]
 
     def post(self, request):
-        profil = obtenir_profil_livreur(request.user)
-        livraison_active = Livraison.objects.filter(livreur=profil).exclude(etape=EtapeLivraison.LIVREE).first()
-        if not livraison_active:
-            raise ErreurMetier("Aucune livraison active.")
-
-        demarrer_trajet_vers_client(livraison_active)
-        return Response({"etape": livraison_active.etape, "message": "En route vers le client."})
+        livraison = exiger_livraison_active(obtenir_profil_livreur(request.user))
+        demarrer_trajet_vers_client(livraison)
+        return Response({"etape": livraison.etape, "message": "En route vers le client."})
 
 
 class VueArriveeClient(APIView):
-    """Le livreur signale son arrivée devant le domicile du client."""
+    """Le livreur signale son arrivée à l'adresse du client."""
 
     permission_classes = [EstLivreur]
 
     def post(self, request):
-        profil = obtenir_profil_livreur(request.user)
-        livraison_active = Livraison.objects.filter(livreur=profil).exclude(etape=EtapeLivraison.LIVREE).first()
-        if not livraison_active:
-            raise ErreurMetier("Aucune livraison active.")
-
-        signaler_arrivee_domicile_client(livraison_active)
-        return Response({"etape": livraison_active.etape, "message": "Arrivé devant l'adresse client."})
+        livraison = exiger_livraison_active(obtenir_profil_livreur(request.user))
+        signaler_arrivee_domicile_client(livraison)
+        return Response({"etape": livraison.etape, "message": "Arrivé à l'adresse du client."})
 
 
 class VueCloturerLivraisonPin(APIView):
-    """Le coursier saisit le code PIN donné par le client pour finaliser la livraison."""
+    """Le livreur saisit le PIN du client pour clôturer SA livraison (jamais celle d'un autre)."""
 
     permission_classes = [EstLivreur]
 
     def post(self, request):
+        serializer = SerializerValidationPinLivreur(data=request.data)
+        serializer.is_valid(raise_exception=True)
         profil = obtenir_profil_livreur(request.user)
-        code_pin = request.data.get("code_pin", "")
-
-        livraison_active = Livraison.objects.filter(livreur=profil).exclude(etape=EtapeLivraison.LIVREE).first()
-        if not livraison_active:
-            commande_ref = request.data.get("commande_reference") or request.data.get("commande_id")
-            if commande_ref:
-                ref = str(commande_ref).lstrip("#")
-                commande = Commande.objects.filter(reference=ref).first()
-                if not commande and str(commande_ref).isdigit():
-                    commande = Commande.objects.filter(pk=int(commande_ref)).first()
-                if commande and commande.statut != StatutCommande.LIVREE:
-                    valider_reception_client_par_pin(commande, request.user, code_pin)
-                    gain = max(int(commande.frais_livraison_fcfa * 0.8), 1000)
-                    return Response(
-                        {
-                            "succes": True,
-                            "message": "Livraison clôturée avec succès.",
-                            "gain_fcfa": gain,
-                        }
-                    )
-            raise ErreurMetier("Aucune livraison active.")
-
-        valider_livraison_avec_pin(livraison_active, code_pin)
-        return Response(
-            {
-                "succes": True,
-                "message": "Livraison clôturée avec succès. Félicitations pour votre course !",
-                "gain_fcfa": livraison_active.gain_livreur_fcfa,
-            }
-        )
+        livraison = valider_livraison_avec_pin(profil, serializer.validated_data["code_pin"])
+        return Response({
+            "succes": True,
+            "message": "Livraison clôturée avec succès. Félicitations pour votre course !",
+            "gain_fcfa": livraison.gain_livreur_fcfa,
+        })
 
 
 class VuePositionGpsLivreur(APIView):
-    """Mise à jour en continu de la géolocalisation pour le tracé Leaflet."""
+    """Réception de la position GPS réelle du téléphone du livreur."""
 
     permission_classes = [EstLivreur]
 
@@ -195,25 +157,19 @@ class VuePositionGpsLivreur(APIView):
         profil = obtenir_profil_livreur(request.user)
         serializer = SerializerMiseAJourPosition(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        lat = float(serializer.validated_data["latitude"])
-        lng = float(serializer.validated_data["longitude"])
-
-        mettre_a_jour_position_gps(
-            profil_livreur=profil,
-            latitude=lat,
-            longitude=lng,
-        )
+        latitude = float(serializer.validated_data["latitude"])
+        longitude = float(serializer.validated_data["longitude"])
+        mettre_a_jour_position_gps(profil, latitude, longitude)
         return Response({
             "succes": True,
-            "latitude": lat,
-            "longitude": lng,
-            "date_derniere_position": profil.date_derniere_position.isoformat() if profil.date_derniere_position else None,
+            "latitude": latitude,
+            "longitude": longitude,
+            "date_derniere_position": profil.date_derniere_position.isoformat(),
         })
 
 
 class VueDisponibiliteLivreur(APIView):
-    """Interrupteur En ligne / Hors ligne."""
+    """Interrupteur En ligne / Hors ligne (refusé si le profil n'est pas validé)."""
 
     permission_classes = [EstLivreur]
 
@@ -221,12 +177,9 @@ class VueDisponibiliteLivreur(APIView):
         return self.patch(request)
 
     def patch(self, request):
-        profil = obtenir_profil_livreur(request.user)
         serializer = SerializerChangementDisponibilite(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        profil.disponibilite = serializer.validated_data["disponibilite"]
-        profil.save(update_fields=["disponibilite"])
+        profil = changer_disponibilite(obtenir_profil_livreur(request.user), serializer.validated_data["disponibilite"])
         return Response({"disponibilite": profil.disponibilite})
 
 
@@ -261,9 +214,9 @@ class VueMonProfilLivreur(APIView):
                 setattr(user, champ, str(valeur).strip())
                 utilisateur_modifie = True
 
-        # Mise à jour de la photo de profil
+        # Mise à jour de la photo de profil (fichier contrôlé : vraie image JPG/PNG/WEBP)
         if "photo" in request.FILES:
-            user.photo = request.FILES["photo"]
+            user.photo = valider_image(request.FILES["photo"])
             utilisateur_modifie = True
 
         # Mise à jour du mot de passe
@@ -273,8 +226,9 @@ class VueMonProfilLivreur(APIView):
             if len(nouveau_mdp) < 6:
                 raise ErreurMetier("Le mot de passe doit comporter au moins 6 caractères.", code="mot_de_passe_court")
 
+            # L'ancien mot de passe est obligatoire : un jeton volé ne suffit pas à changer le mot de passe.
             ancien_mdp = data.get("ancien_mot_de_passe") or data.get("ancienMotDePasse")
-            if ancien_mdp and not user.check_password(ancien_mdp):
+            if not ancien_mdp or not user.check_password(ancien_mdp):
                 raise ErreurMetier("L'ancien mot de passe saisi est incorrect.", code="ancien_mot_de_passe_invalide")
 
             user.set_password(nouveau_mdp)
@@ -287,7 +241,10 @@ class VueMonProfilLivreur(APIView):
         profil_modifie = False
         type_vehicule = data.get("type_vehicule") or data.get("typeVehicule")
         if type_vehicule:
-            profil.type_vehicule = str(type_vehicule).upper().strip()
+            type_vehicule = str(type_vehicule).upper().strip()
+            if type_vehicule not in TypeVehicule.values:
+                raise ErreurMetier("Type de véhicule inconnu.", code="type_vehicule_invalide")
+            profil.type_vehicule = type_vehicule
             profil_modifie = True
 
         nom_vehicule = data.get("nom_vehicule") or data.get("nomVehicule")
@@ -314,14 +271,14 @@ class VueMonProfilLivreur(APIView):
             DocumentJustificatif.objects.create(
                 proprietaire=user,
                 type_document=TypeDocument.PERMIS_CONDUIRE,
-                fichier=request.FILES["permis_recto"],
+                fichier=valider_document(request.FILES["permis_recto"]),
                 statut=StatutDocument.EN_ATTENTE,
             )
         if "permis_verso" in request.FILES:
             DocumentJustificatif.objects.create(
                 proprietaire=user,
                 type_document=TypeDocument.PERMIS_CONDUIRE,
-                fichier=request.FILES["permis_verso"],
+                fichier=valider_document(request.FILES["permis_verso"]),
                 statut=StatutDocument.EN_ATTENTE,
             )
 

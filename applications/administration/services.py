@@ -21,6 +21,18 @@ from applications.etablissements.models import Etablissement, TypeEtablissement
 from applications.livraisons.models import DisponibiliteLivreur, ProfilLivreur
 from applications.notifications.models import TypeNotification
 from applications.notifications.services import creer_notification
+from applications.utilisateurs.models import StatutDocument
+
+STATUTS_SANCTION = {StatutValidationPartenaire.SUSPENDU, StatutValidationPartenaire.BANNI}
+
+
+def valider_documents_en_attente(utilisateur) -> None:
+    """Valider un dossier partenaire = déclarer conformes ses pièces encore en attente."""
+    from django.utils import timezone
+
+    utilisateur.documents.filter(statut=StatutDocument.EN_ATTENTE).update(
+        statut=StatutDocument.CONFORME, date_verification=timezone.now()
+    )
 
 
 @transaction.atomic
@@ -43,7 +55,11 @@ def appliquer_decision_etablissement(
 
     etablissement.statut_validation = nouveau_statut
     etablissement.motif_decision = motif_decision
-    etablissement.save(update_fields=["statut_validation", "motif_decision"])
+    if nouveau_statut in STATUTS_SANCTION:
+        etablissement.est_ouvert = False  # un restaurant sanctionné ne reçoit plus de commandes
+    etablissement.save(update_fields=["statut_validation", "motif_decision", "est_ouvert"])
+    if nouveau_statut == StatutValidationPartenaire.ACTIF:
+        valider_documents_en_attente(etablissement.gerant)
 
     # Notification du gérant
     titre = (
@@ -88,7 +104,11 @@ def appliquer_decision_livreur(
 
     profil_livreur.statut_validation = nouveau_statut
     profil_livreur.motif_decision = motif_decision
-    profil_livreur.save(update_fields=["statut_validation", "motif_decision"])
+    if nouveau_statut in STATUTS_SANCTION:
+        profil_livreur.disponibilite = DisponibiliteLivreur.HORS_LIGNE
+    profil_livreur.save(update_fields=["statut_validation", "motif_decision", "disponibilite"])
+    if nouveau_statut == StatutValidationPartenaire.ACTIF:
+        valider_documents_en_attente(profil_livreur.utilisateur)
 
     # Notification du coursier
     titre = (

@@ -18,7 +18,6 @@ from applications.commandes.services import (
     creer_commande_depuis_panier,
     marquer_commande_prete,
     transitionner_statut_commande,
-    valider_reception_client_par_pin,
 )
 from applications.communs.choix import StatutValidationPartenaire
 from applications.communs.erreurs import AccesRefuse, ErreurMetier, TransitionInterdite
@@ -193,35 +192,7 @@ class TestCycleDeVieCommande:
         assert commande.statut == StatutCommande.PRETE_POUR_RETRAIT
         assert commande.heure_fin_preparation is not None
 
-    def test_verification_code_pin_livraison(self, donnees_test):
-        client = donnees_test["client"]
-        livreur = donnees_test["livreur"]
-        etablissement = donnees_test["etablissement"]
-        plat1 = donnees_test["plat1"]
-
-        LignePanier.objects.create(client=client, plat=plat1, quantite=1)
-        commande = creer_commande_depuis_panier(
-            client=client,
-            etablissement_id=etablissement.id,
-            adresse_livraison="Almadies, Dakar",
-            telephone_contact="+221770001122",
-        )
-
-        # Mettre la commande en statut ARRIVE_CLIENT pour tester la remise PIN
-        commande.statut = StatutCommande.ARRIVE_CLIENT
-        commande.save()
-
-        # Échec : mauvais code PIN
-        code_faux = "0000" if commande.code_livraison_pin != "0000" else "1111"
-        with pytest.raises(ErreurMetier) as exc:
-            valider_reception_client_par_pin(commande, livreur, code_faux)
-        assert "Code PIN de sécurité incorrect" in str(exc.value)
-
-        # Succès : code PIN exact
-        valider_reception_client_par_pin(commande, livreur, commande.code_livraison_pin)
-        commande.refresh_from_db()
-        assert commande.statut == StatutCommande.LIVREE
-        assert commande.heure_livraison_effective is not None
+    # La validation du PIN est testée dans livraisons/tests (seul le livreur assigné peut la faire).
 
     def test_permission_refus_restaurant_tiers(self, donnees_test):
         client = donnees_test["client"]

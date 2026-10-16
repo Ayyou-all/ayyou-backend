@@ -9,9 +9,10 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
-from django.views.static import serve
 from django.urls import include, path, re_path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from applications.communs.fichiers import servir_media_public
 
 
 def vue_sante(_requete):
@@ -42,6 +43,7 @@ urlpatterns = [
     path("api/notifications/", include("applications.notifications.urls")),
     path("api/administration/", include("applications.administration.urls")),
     path("api/ia/", include("applications.intelligence.urls")),
-    # Distribution des fichiers médias téléversés (photos de plats, logos, bannières)
-    re_path(r"^medias/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+    # Médias publics (photos, logos, vidéos). Les pièces justificatives en sont exclues :
+    # elles passent par /api/utilisateurs/documents/<id>/fichier/ (authentification obligatoire).
+    re_path(r"^medias/(?P<path>.*)$", servir_media_public),
 ]

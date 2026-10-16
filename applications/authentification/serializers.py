@@ -9,8 +9,9 @@ type_vehicule, adresse, conditions_acceptees.
 from django.contrib.auth import password_validation
 from rest_framework import serializers
 
+from applications.communs.fichiers import valider_document, valider_image
 from applications.livraisons.models import TypeVehicule
-from applications.utilisateurs.models import ROLES_GERANTS, ROLES_INSCRIPTION_PUBLIQUE, Role, Utilisateur
+from applications.utilisateurs.models import ROLES_GERANTS, ROLES_INSCRIPTION_PUBLIQUE, Role, TypeDocument, Utilisateur
 
 
 class SerializerInscription(serializers.Serializer):
@@ -26,20 +27,25 @@ class SerializerInscription(serializers.Serializer):
     nom_vehicule = serializers.CharField(max_length=80, required=False, allow_blank=True)
     immatriculation = serializers.CharField(max_length=30, required=False, allow_blank=True)
     zone_principale = serializers.CharField(max_length=120, required=False, allow_blank=True)
-    photo = serializers.FileField(required=False, allow_null=True)
+    photo = serializers.FileField(required=False, allow_null=True, validators=[valider_image])
     adresse = serializers.CharField(max_length=255, required=False, allow_blank=True)
     conditions_acceptees = serializers.BooleanField()
-    document_justificatif = serializers.FileField(required=False, allow_null=True)
-    document_type = serializers.CharField(max_length=40, required=False, allow_blank=True, default="RCCM")
-    logo = serializers.FileField(required=False, allow_null=True)
-    couverture = serializers.FileField(required=False, allow_null=True)
-    permis_recto = serializers.FileField(required=False, allow_null=True)
-    permis_verso = serializers.FileField(required=False, allow_null=True)
+    # Chaque fichier est contrôlé (extension, taille, contenu réel) avant d'être enregistré.
+    document_justificatif = serializers.FileField(required=False, allow_null=True, validators=[valider_document])
+    document_type = serializers.ChoiceField(choices=TypeDocument.choices, required=False, default=TypeDocument.RCCM)
+    logo = serializers.FileField(required=False, allow_null=True, validators=[valider_image])
+    couverture = serializers.FileField(required=False, allow_null=True, validators=[valider_image])
+    permis_recto = serializers.FileField(required=False, allow_null=True, validators=[valider_document])
+    permis_verso = serializers.FileField(required=False, allow_null=True, validators=[valider_document])
 
     def validate_courriel(self, courriel):
         courriel = courriel.lower().strip()
         if Utilisateur.objects.filter(courriel=courriel).exists():
             raise serializers.ValidationError("Un compte existe déjà avec ce courriel.")
+        from .services import courriel_recemment_verifie
+
+        if not courriel_recemment_verifie(courriel):
+            raise serializers.ValidationError("Veuillez d'abord vérifier votre adresse e-mail avec le code reçu.")
         return courriel
 
     def validate_telephone(self, telephone):

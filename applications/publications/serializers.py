@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from applications.catalogue.models import Plat
 from applications.catalogue.serializers import SerializerPlat
+from applications.communs.fichiers import valider_image
 from applications.communs.outils import construire_url_absolue
 
 from .analyseur_video import valider_fichier_video
@@ -129,6 +130,10 @@ class SerializerCreationPublication(serializers.ModelSerializer):
             duree = valider_fichier_video(fichier)
             if duree is not None:
                 attrs["duree_secondes"] = int(duree)
+        if type_media == TypeMedia.IMAGE and fichier:
+            valider_image(fichier)  # une « photo » ne peut pas être un fichier HTML ou SVG
+        if attrs.get("image_miniature"):
+            valider_image(attrs["image_miniature"])
 
         plat_id = attrs.get("plat_id")
         if plat_id:

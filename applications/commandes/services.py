@@ -364,27 +364,5 @@ def marquer_commande_prete(commande: Commande, gerant) -> Commande:
     )
 
 
-def valider_reception_client_par_pin(commande: Commande, livreur, code_pin_saisi: str) -> Commande:
-    """
-    Action Livreur (T09) : Saisie exacte du code PIN de 4 chiffres du client.
-    Règle P1 résolue : compare rigoureusement le code saisi avec code_livraison_pin.
-    """
-    if not (livreur.is_superuser or livreur.role == Role.LIVREUR):
-        raise AccesRefuse("Seul un livreur peut valider la remise de commande.")
-
-    if commande.statut == StatutCommande.LIVREE:
-        raise ErreurMetier("Cette commande a déjà été validée et livrée.", code="commande_deja_livree")
-
-    code_nettoye = str(code_pin_saisi).strip()
-    if code_nettoye != commande.code_livraison_pin:
-        raise ErreurMetier(
-            "Code PIN de sécurité incorrect. Veuillez demander au client son code à 4 chiffres.",
-            code="code_pin_invalide",
-        )
-
-    return transitionner_statut_commande(
-        commande=commande,
-        nouveau_statut=StatutCommande.LIVREE,
-        auteur=livreur,
-        commentaire="Code PIN client vérifié avec succès. Commande livrée.",
-    )
+# La clôture par code PIN est gérée par applications/livraisons/services.py
+# (valider_livraison_avec_pin) : seul le livreur assigné peut la faire.

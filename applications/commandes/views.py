@@ -37,7 +37,6 @@ from .services import (
     creer_commande_depuis_panier,
     marquer_commande_prete,
     refuser_commande_par_restaurant,
-    valider_reception_client_par_pin,
 )
 
 
@@ -187,26 +186,31 @@ class VueMarquerPreteCommande(APIView):
 
 class VueValiderPinLivraison(APIView):
     """
-    Le coursier valide la livraison en saisissant le PIN fourni par le client.
-    Vérification stricte de sécurité.
+    Clôture par PIN via l'identifiant de commande.
+    Même règle que /api/livraisons/mission-en-cours/valider-pin/ : seul le livreur
+    assigné à CETTE commande peut saisir le PIN, avec un nombre d'essais limité.
     """
 
     permission_classes = [EstLivreur]
 
     def post(self, request, pk):
+        from applications.livraisons.services import obtenir_profil_livreur, valider_livraison_avec_pin
+
         commande = get_commande_par_pk_ou_reference(pk)
         serializer = SerializerValidationPin(data=request.data)
         serializer.is_valid(raise_exception=True)
-        code_saisi = serializer.validated_data["code_pin"]
 
-        commande_maj = valider_reception_client_par_pin(commande, request.user, code_saisi)
-        return Response(
-            {
-                "succes": True,
-                "message": "Code PIN validé avec succès. Commande marquée comme livrée.",
-                "statut": commande_maj.statut,
-            }
-        )
+        profil = obtenir_profil_livreur(request.user)
+        livraison = getattr(commande, "livraison", None)
+        if livraison is None or livraison.livreur_id != profil.id:
+            raise AccesRefuse("Cette commande n'est pas assignée à votre compte livreur.")
+
+        valider_livraison_avec_pin(profil, serializer.validated_data["code_pin"])
+        return Response({
+            "succes": True,
+            "message": "Code PIN validé avec succès. Commande marquée comme livrée.",
+            "statut": StatutCommande.LIVREE,
+        })
 
 
 class VueHistoriqueCommande(generics.ListAPIView):
