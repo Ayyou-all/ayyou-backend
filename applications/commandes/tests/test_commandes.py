@@ -239,3 +239,49 @@ class TestCycleDeVieCommande:
 
         with pytest.raises(AccesRefuse):
             accepter_commande_par_restaurant(commande, autre_gerant)
+
+    def test_commande_hors_zone_dakar_rejetee(self, donnees_test):
+        client = donnees_test["client"]
+        etablissement = donnees_test["etablissement"]
+        plat1 = donnees_test["plat1"]
+
+        LignePanier.objects.create(client=client, plat=plat1, quantite=1)
+
+        # Coordonnées hors région de Dakar (ex: Thiès / Saint-Louis)
+        with pytest.raises(ErreurMetier) as exc:
+            creer_commande_depuis_panier(
+                client=client,
+                etablissement_id=etablissement.id,
+                adresse_livraison="Thiès ville",
+                telephone_contact="+221770001122",
+                latitude_livraison=14.790000,
+                longitude_livraison=-16.920000,
+            )
+        assert exc.value.code == "zone_non_eligible"
+        assert "cette zone n'est pas encore éligible à la livraison AYYOU" in str(exc.value)
+
+    def test_commande_calcul_frais_progressifs_distance(self, donnees_test):
+        client = donnees_test["client"]
+        etablissement = donnees_test["etablissement"]
+        plat1 = donnees_test["plat1"]
+
+        # Établissement situé au Plateau
+        etablissement.latitude = 14.670000
+        etablissement.longitude = -17.430000
+        etablissement.save()
+
+        LignePanier.objects.create(client=client, plat=plat1, quantite=1)
+
+        # Client à Mermoz (environ 6 km)
+        commande = creer_commande_depuis_panier(
+            client=client,
+            etablissement_id=etablissement.id,
+            adresse_livraison="Mermoz, Dakar",
+            telephone_contact="+221770001122",
+            latitude_livraison=14.710000,
+            longitude_livraison=-17.470000,
+        )
+
+        assert commande.frais_livraison_fcfa >= 1000
+        assert commande.frais_livraison_fcfa <= 2000
+        assert commande.total_fcfa == commande.sous_total_fcfa + commande.frais_livraison_fcfa

@@ -45,7 +45,6 @@ def lister_courses_disponibles(profil_livreur: ProfilLivreur):
 
     statuts_eligibles = [
         StatutCommande.PRETE_POUR_RETRAIT,
-        StatutCommande.EN_PREPARATION,
     ]
     return (
         Commande.objects.filter(
@@ -64,6 +63,7 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     Action Livreur (T05) : Accepter la mission de livraison proposée.
     Passe la commande à COURSE_ASSIGNEE et le livreur à OCCUPE.
     Verrouille la commande avec select_for_update pour éliminer tout risque de double assignation concurrente.
+    Respecte la souveraineté du restaurant : la commande doit impérativement avoir été déclarée prête par le restaurant.
     """
     if profil_livreur.disponibilite != DisponibiliteLivreur.EN_LIGNE and profil_livreur.disponibilite != DisponibiliteLivreur.OCCUPE:
         raise ErreurMetier(
@@ -80,13 +80,9 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     if commande_verrouillee is None:
         raise ErreurMetier("Commande introuvable.", code="commande_introuvable")
 
-    statuts_acceptables = [
-        StatutCommande.PRETE_POUR_RETRAIT,
-        StatutCommande.EN_PREPARATION,
-    ]
-    if commande_verrouillee.statut not in statuts_acceptables:
+    if commande_verrouillee.statut != StatutCommande.PRETE_POUR_RETRAIT:
         raise ErreurMetier(
-            f"Cette course n'est plus disponible (statut : {commande_verrouillee.statut}).",
+            f"Cette course n'est pas encore prête ou n'est plus disponible (statut : {commande_verrouillee.statut}).",
             code="course_indisponible",
         )
 
@@ -95,15 +91,6 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
         if livraison_existante.livreur == profil_livreur:
             return livraison_existante
         raise ErreurMetier("Cette commande a déjà été assignée à un autre coursier.", code="course_deja_assignee")
-
-    # Si la commande est encore en préparation, finaliser la transition vers PRETE_POUR_RETRAIT
-    if commande_verrouillee.statut == StatutCommande.EN_PREPARATION:
-        transitionner_statut_commande(
-            commande=commande_verrouillee,
-            nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
-            auteur=profil_livreur.utilisateur,
-            commentaire="Commande prête pour retrait par le livreur.",
-        )
 
     # Gain livreur : part des frais de livraison (ex: 80% des frais de livraison, minimum 1000 FCFA)
     gain_fcfa = max(int(commande_verrouillee.frais_livraison_fcfa * 0.8), 1000)
@@ -205,22 +192,46 @@ def signaler_arrivee_domicile_client(livraison: Livraison) -> Livraison:
 def valider_livraison_avec_pin(livraison: Livraison, code_pin: str) -> Livraison:
     """
     Action Livreur (T09) : Saisie du code PIN client et clôture finale de la livraison.
-    Libère le coursier (redevient EN_LIGNE).
+    Contrôles stricts :
+    - Bloque si la livraison ou la commande est déjà au statut LIVREE
+    - Protection anti-bruteforce : max 5 tentatives de code PIN erroné
+    - Libère le coursier (redevient EN_LIGNE)
     """
     commande = Commande.objects.get(pk=livraison.commande_id)
     livraison.commande = commande
     livreur = livraison.livreur
 
+    if livraison.etape == EtapeLivraison.LIVREE or commande.statut == StatutCommande.LIVREE:
+        raise ErreurMetier("Cette commande a déjà été livrée.", code="commande_deja_livree")
+
+    if livraison.essais_code_echoues >= 5:
+        raise ErreurMetier(
+            "Nombre maximal de tentatives de validation atteint (5). Veuillez contacter le support AYYOU.",
+            code="tentatives_depassees",
+        )
+
     try:
         valider_reception_client_par_pin(commande, livreur.utilisateur, code_pin)
     except ErreurMetier as e:
-        livraison.essais_code_echoues += 1
-        livraison.save(update_fields=["essais_code_echoues"])
+        if e.code == "code_pin_invalide":
+            livraison.essais_code_echoues += 1
+            livraison.save(update_fields=["essais_code_echoues"])
+            restants = max(0, 5 - livraison.essais_code_echoues)
+            if restants == 0:
+                raise ErreurMetier(
+                    "Code PIN incorrect. Nombre maximal de tentatives atteint (5). La commande est verrouillée, contactez le support.",
+                    code="tentatives_depassees",
+                )
+            raise ErreurMetier(
+                f"Code PIN incorrect. Il vous reste {restants} tentative(s).",
+                code="code_pin_invalide",
+            )
         raise e
 
     livraison.etape = EtapeLivraison.LIVREE
     livraison.date_livraison = timezone.now()
-    livraison.save(update_fields=["etape", "date_livraison"])
+    livraison.essais_code_echoues = 0
+    livraison.save(update_fields=["etape", "date_livraison", "essais_code_echoues"])
 
     # Le coursier redevient disponible pour de nouvelles courses
     livreur.disponibilite = DisponibiliteLivreur.EN_LIGNE
