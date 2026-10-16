@@ -62,7 +62,23 @@ def generer_reference_commande() -> str:
 
 
 def generer_code_livraison_pin() -> str:
-    return generer_code_numerique(4)
+    """
+    Génère un code PIN à 4 chiffres sécurisé, avec garantie d'absence de collision
+    parmi les commandes actuellement actives.
+    """
+    try:
+        from django.apps import apps
+        CommandeModel = apps.get_model("commandes", "Commande")
+        for _ in range(50):
+            code = generer_code_numerique(4)
+            if not CommandeModel.objects.filter(
+                code_livraison_pin=code,
+                statut__in=STATUTS_COMMANDES_EN_COURS,
+            ).exists():
+                return code
+        return generer_code_numerique(6)
+    except Exception:
+        return generer_code_numerique(4)
 
 
 class Commande(models.Model):
@@ -134,6 +150,13 @@ class Commande(models.Model):
         indexes = [
             models.Index(fields=["client", "-date_creation"]),
             models.Index(fields=["etablissement", "statut"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["code_livraison_pin"],
+                condition=models.Q(statut__in=STATUTS_COMMANDES_EN_COURS),
+                name="uniq_pin_commande_active",
+            )
         ]
 
     def __str__(self) -> str:

@@ -212,3 +212,67 @@ class TestLivraisons:
         # Le coursier doit être libéré et redevenir disponible pour de nouvelles courses
         profil.refresh_from_db()
         assert profil.disponibilite == DisponibiliteLivreur.EN_LIGNE
+
+    def test_refus_acceptation_si_en_preparation(self, environnement_livraison):
+        profil = environnement_livraison["profil_livreur"]
+        commande = environnement_livraison["commande"]
+        # Passer en préparation (cuisine non terminée)
+        commande.statut = StatutCommande.EN_PREPARATION
+        commande.save(update_fields=["statut"])
+
+        with pytest.raises(ErreurMetier) as exc:
+            accepter_mission_livraison(commande, profil)
+        assert exc.value.code == "course_indisponible"
+        # Le statut ne doit pas avoir bougé (souveraineté restaurant)
+        commande.refresh_from_db()
+        assert commande.statut == StatutCommande.EN_PREPARATION
+
+    def test_anti_bruteforce_pin_cinq_essais(self, environnement_livraison):
+        profil = environnement_livraison["profil_livreur"]
+        commande = environnement_livraison["commande"]
+        art1 = environnement_livraison["art1"]
+        art2 = environnement_livraison["art2"]
+
+        livraison = accepter_mission_livraison(commande, profil)
+        pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
+        pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
+        demarrer_trajet_vers_client(livraison)
+        commande.statut = StatutCommande.ARRIVE_CLIENT
+        commande.save()
+
+        # 4 tentatives avec un mauvais code PIN
+        for _ in range(4):
+            with pytest.raises(ErreurMetier) as exc:
+                valider_livraison_avec_pin(livraison, "9999")
+            assert exc.value.code == "code_pin_invalide"
+
+        # 5ème tentative échouée -> verrouillage immédiat
+        with pytest.raises(ErreurMetier) as exc:
+            valider_livraison_avec_pin(livraison, "9999")
+        assert exc.value.code == "tentatives_depassees"
+
+        # 6ème tentative même avec le bon code PIN -> toujours bloquée
+        with pytest.raises(ErreurMetier) as exc:
+            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        assert exc.value.code == "tentatives_depassees"
+
+    def test_rejet_revalidation_commande_deja_livree(self, environnement_livraison):
+        profil = environnement_livraison["profil_livreur"]
+        commande = environnement_livraison["commande"]
+        art1 = environnement_livraison["art1"]
+        art2 = environnement_livraison["art2"]
+
+        livraison = accepter_mission_livraison(commande, profil)
+        pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
+        pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
+        demarrer_trajet_vers_client(livraison)
+        commande.statut = StatutCommande.ARRIVE_CLIENT
+        commande.save()
+
+        # Première validation réussie
+        valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+
+        # Seconde validation doit être immédiatement rejetée
+        with pytest.raises(ErreurMetier) as exc:
+            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        assert exc.value.code == "commande_deja_livree"
