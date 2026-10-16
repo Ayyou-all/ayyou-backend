@@ -34,6 +34,7 @@ from .serializers import (
     SerializerValidationPin,
 )
 from .services import (
+    annuler_commande_par_client,
     accepter_commande_par_restaurant,
     creer_commande_depuis_panier,
     estimer_montants_commande,
@@ -166,6 +167,20 @@ def get_commande_par_pk_ou_reference(pk_val) -> Commande:
     if cmd:
         return cmd
     raise NotFound(f"Commande « {pk_val} » introuvable.")
+
+
+class VueAnnulerCommandeClient(APIView):
+    """
+    POST /api/commandes/<id>/annuler/ {"motif": "..."}
+    Le client annule sa commande tant que le restaurant ne l'a pas acceptée (remboursement si payée).
+    """
+
+    permission_classes = [EstClient]
+
+    def post(self, request, pk):
+        commande = get_commande_par_pk_ou_reference(pk)
+        commande = annuler_commande_par_client(commande, request.user, motif=str(request.data.get("motif", "")))
+        return Response(SerializerCommandeClient(commande, context={"request": request}).data)
 
 
 class VueAccepterCommande(APIView):

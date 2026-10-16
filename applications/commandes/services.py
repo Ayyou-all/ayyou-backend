@@ -8,6 +8,7 @@ Responsabilités :
 4. Journalisation systématique de chaque transition dans l'historique d'audit.
 """
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -185,6 +186,7 @@ def creer_commande_depuis_panier(
         sous_total_fcfa=sous_total_fcfa,
         frais_livraison_fcfa=frais_livraison_fcfa,
         total_fcfa=sous_total_fcfa + frais_livraison_fcfa,
+        commission_plateforme_fcfa=int(sous_total_fcfa * settings.COMMISSION_RESTAURANT_POURCENT / 100),
         source_video_id=source_video_id.strip(),
     )
     for ligne in lignes_a_creer:
@@ -213,15 +215,19 @@ def transitionner_statut_commande(
     delai_minutes: int | None = None,
 ) -> Commande:
     """
-    Applique une transition de statut à la commande après validation de la machine à états.
-    """
-    ancien_statut = commande.statut
+    Applique une transition de statut après vérification de la machine à états.
 
+    La commande est relue et VERROUILLÉE en base (select_for_update) : si deux requêtes
+    arrivent en même temps, la seconde attend la première puis voit le statut à jour.
+    L'objet `commande` passé en paramètre est ensuite rafraîchi pour l'appelant.
+    """
+    verrouillee = Commande.objects.select_for_update().get(pk=commande.pk)
+    ancien_statut = verrouillee.statut
     if ancien_statut == nouveau_statut:
+        commande.refresh_from_db()
         return commande
 
-    cibles_possibles = TRANSITIONS_COMMANDES_VALIDES.get(ancien_statut, set())
-    if nouveau_statut not in cibles_possibles:
+    if nouveau_statut not in TRANSITIONS_COMMANDES_VALIDES.get(ancien_statut, set()):
         raise TransitionInterdite(
             f"Transition interdite : impossible de passer de « {ancien_statut} » à « {nouveau_statut} ».",
             details={"ancien_statut": ancien_statut, "nouveau_statut": nouveau_statut},
@@ -229,80 +235,83 @@ def transitionner_statut_commande(
 
     maintenant = timezone.now()
     champs_maj = ["statut", "date_modification"]
-
     if nouveau_statut == StatutCommande.EN_PREPARATION:
-        commande.heure_debut_preparation = maintenant
+        verrouillee.heure_debut_preparation = maintenant
         champs_maj.append("heure_debut_preparation")
         if delai_minutes is not None:
-            commande.delai_preparation_estime_minutes = delai_minutes
+            verrouillee.delai_preparation_estime_minutes = delai_minutes
             champs_maj.append("delai_preparation_estime_minutes")
-
     elif nouveau_statut == StatutCommande.PRETE_POUR_RETRAIT:
-        commande.heure_fin_preparation = maintenant
+        verrouillee.heure_fin_preparation = maintenant
         champs_maj.append("heure_fin_preparation")
-
     elif nouveau_statut == StatutCommande.EN_LIVRAISON:
-        commande.heure_depart_livraison = maintenant
+        verrouillee.heure_depart_livraison = maintenant
         champs_maj.append("heure_depart_livraison")
-
     elif nouveau_statut == StatutCommande.LIVREE:
-        commande.heure_livraison_effective = maintenant
+        verrouillee.heure_livraison_effective = maintenant
         champs_maj.append("heure_livraison_effective")
-
-    elif nouveau_statut in {StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON}:
+    elif nouveau_statut in (StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON):
         if not motif:
             raise ErreurMetier("Un motif est obligatoire pour refuser, annuler ou déclarer un échec de livraison.")
-        commande.motif_refus_ou_annulation = motif
+        verrouillee.motif_refus_ou_annulation = motif
         champs_maj.append("motif_refus_ou_annulation")
 
-    commande.statut = nouveau_statut
-    commande.save(update_fields=champs_maj)
-
+    verrouillee.statut = nouveau_statut
+    verrouillee.save(update_fields=champs_maj)
     HistoriqueStatutCommande.objects.create(
-        commande=commande,
+        commande=verrouillee,
         ancien_statut=ancien_statut,
         nouveau_statut=nouveau_statut,
         auteur=auteur,
         commentaire=commentaire or motif,
     )
 
-    if nouveau_statut == StatutCommande.CREEE_EN_ATTENTE:
-        try:
-            from applications.notifications.services import creer_notification
-            from applications.notifications.models import TypeNotification
-            if commande.etablissement and commande.etablissement.gerant:
-                creer_notification(
-                    destinataire=commande.etablissement.gerant,
-                    titre=f"Nouvelle commande payée {commande.reference} !",
-                    message=f"Commande de {commande.total_fcfa} FCFA par {commande.client.nom_complet if commande.client else 'Client'}.",
-                    type_notification=TypeNotification.COMMANDE_NOUVELLE,
-                    texte_vocal=f"Nouvelle commande payée {commande.reference}",
-                    reference_commande=commande.reference,
-                )
-            if commande.client:
-                creer_notification(
-                    destinataire=commande.client,
-                    titre=f"Paiement validé pour {commande.reference}",
-                    message=f"Votre commande auprès de {commande.etablissement.nom} a été confirmée et transmise en cuisine.",
-                    type_notification=TypeNotification.COMMANDE_EN_PREPARATION,
-                    texte_vocal="Paiement validé avec succès",
-                    reference_commande=commande.reference,
-                )
-        except Exception as e:
-            import logging
-            logging.getLogger("ayyou.commandes").warning(f"Erreur notification post-paiement: {e}")
+    from applications.notifications.services import notifier_changement_statut
 
+    notifier_changement_statut(verrouillee, nouveau_statut, auteur=auteur)
+    commande.refresh_from_db()
     return commande
 
 
-# --- Actions spécifiques par acteur ---
+# --- Actions par acteur ---------------------------------------------------------
+# Chaque fonction vérifie QUI agit et À QUEL MOMENT, puis délègue la transition.
+
+
+def _verifier_gerant(commande: Commande, gerant) -> None:
+    if commande.etablissement.gerant_id != gerant.id:
+        raise AccesRefuse("Vous ne pouvez gérer que les commandes de votre propre établissement.")
+
+
+def annuler_et_rembourser(commande: Commande, auteur, motif: str, commentaire: str = "") -> Commande:
+    """
+    Annule la commande puis rembourse ce qui a été payé.
+    Si PayTech refuse ou ne répond pas, le paiement reste « confirmé » :
+    l'administration le voit dans la liste des paiements à rembourser.
+    """
+    from applications.notifications.services import creer_notification
+    from applications.paiements.services import rembourser_paiements_commande
+
+    commande = transitionner_statut_commande(
+        commande, StatutCommande.REFUSEE_ANNULEE, auteur=auteur, motif=motif, commentaire=commentaire
+    )
+    if commande.tentatives_paiement.filter(statut="CONFIRME").exists():
+        rembourse = rembourser_paiements_commande(commande)
+        creer_notification(
+            destinataire=commande.client,
+            titre="Remboursement effectué" if rembourse else "Remboursement en cours",
+            message=(
+                f"Les {commande.total_fcfa} FCFA de la commande {commande.reference} vous ont été remboursés."
+                if rembourse
+                else f"Le remboursement de la commande {commande.reference} est en cours de traitement par le support AYYOU."
+            ),
+            reference_commande=commande.reference,
+        )
+    return commande
 
 
 def accepter_commande_par_restaurant(commande: Commande, gerant, delai_minutes: int = 25) -> Commande:
-    """Action Gérant (T02) : Accepter la commande et lancer la préparation."""
-    if not (gerant.is_superuser or commande.etablissement.gerant_id == gerant.id):
-        raise AccesRefuse("Vous ne pouvez accepter que les commandes de votre propre établissement.")
-
+    """Le restaurant accepte une commande payée et annonce son temps de préparation."""
+    _verifier_gerant(commande, gerant)
     return transitionner_statut_commande(
         commande=commande,
         nouveau_statut=StatutCommande.EN_PREPARATION,
@@ -313,33 +322,48 @@ def accepter_commande_par_restaurant(commande: Commande, gerant, delai_minutes: 
 
 
 def refuser_commande_par_restaurant(commande: Commande, gerant, motif: str) -> Commande:
-    """Action Gérant (T03) : Refuser la commande (rupture ingrédient, surcharge)."""
-    if not (gerant.is_superuser or commande.etablissement.gerant_id == gerant.id):
-        raise AccesRefuse("Vous ne pouvez refuser que les commandes de votre propre établissement.")
-
+    """
+    Le restaurant refuse une commande payée qu'il n'a pas encore acceptée.
+    Après acceptation, seul le support peut annuler (un livreur peut déjà être en route).
+    """
+    _verifier_gerant(commande, gerant)
     if not motif.strip():
         raise ErreurMetier("Le motif de refus est obligatoire.", code="motif_obligatoire")
-
-    return transitionner_statut_commande(
-        commande=commande,
-        nouveau_statut=StatutCommande.REFUSEE_ANNULEE,
-        auteur=gerant,
-        motif=motif.strip(),
-        commentaire=f"Refus restaurant : {motif}",
-    )
+    if commande.statut != StatutCommande.CREEE_EN_ATTENTE:
+        raise TransitionInterdite("Une commande déjà acceptée ne peut plus être refusée. Contactez le support AYYOU.")
+    return annuler_et_rembourser(commande, gerant, motif=motif.strip(), commentaire=f"Refus restaurant : {motif.strip()}")
 
 
 def marquer_commande_prete(commande: Commande, gerant) -> Commande:
-    """Action Gérant (T04) : Préparation terminée et emballée au comptoir."""
-    if not (gerant.is_superuser or commande.etablissement.gerant_id == gerant.id):
-        raise AccesRefuse("Vous ne pouvez gérer que les commandes de votre propre établissement.")
-
+    """Le restaurant a terminé la préparation : la commande est prête au comptoir."""
+    _verifier_gerant(commande, gerant)
     return transitionner_statut_commande(
         commande=commande,
         nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
         auteur=gerant,
         commentaire="Plats prêts et emballés au comptoir de retrait.",
     )
+
+
+STATUTS_ANNULABLES_PAR_CLIENT = (StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.CREEE_EN_ATTENTE)
+
+
+def annuler_commande_par_client(commande: Commande, client, motif: str = "") -> Commande:
+    """
+    Le client peut annuler tant que le restaurant n'a pas commencé à cuisiner :
+    - en attente de paiement : simple annulation ;
+    - payée mais pas encore acceptée : annulation + remboursement.
+    Ensuite, la nourriture est en préparation : l'annulation passe par le support.
+    """
+    if commande.client_id != client.id:
+        raise AccesRefuse("Vous ne pouvez annuler que vos propres commandes.")
+    if commande.statut not in STATUTS_ANNULABLES_PAR_CLIENT:
+        raise TransitionInterdite(
+            "Le restaurant prépare déjà votre commande : elle ne peut plus être annulée depuis l'application. "
+            "Contactez le support AYYOU."
+        )
+    motif_final = motif.strip() or "Annulée par le client"
+    return annuler_et_rembourser(commande, client, motif=motif_final, commentaire=f"Annulation client : {motif_final}")
 
 
 # La clôture par code PIN est gérée par applications/livraisons/services.py
