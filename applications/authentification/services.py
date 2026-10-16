@@ -4,6 +4,7 @@ Services d'authentification : création de compte et émission des jetons JWT.
 Appelés par `authentification/views.py`. Aucune logique HTTP ici.
 """
 
+import logging
 import secrets
 from datetime import timedelta
 from django.conf import settings
@@ -13,6 +14,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
+
+logger = logging.getLogger("ayyou")
 
 from applications.communs.erreurs import ErreurMetier
 from applications.etablissements.models import Etablissement, TypeEtablissement
@@ -199,14 +202,29 @@ Plateforme culinaire et de livraison à Dakar
     </div>
     """
 
-    send_mail(
-        subject=sujet,
-        message=corps_texte,
-        html_message=corps_html,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[courriel],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            subject=sujet,
+            message=corps_texte,
+            html_message=corps_html,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[courriel],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        logger.error(f"Échec envoi code email SMTP à {courriel} : {exc}", exc_info=True)
+        detail_erreur = str(exc)
+        if "Authentication" in detail_erreur or "535" in detail_erreur or "Username and Password not accepted" in detail_erreur:
+            msg = "Erreur d'authentification SMTP Google (Code 535). Veuillez générer et configurer un mot de passe d'application Google (16 caractères sans espaces)."
+        elif "timed out" in detail_erreur.lower() or "timeout" in detail_erreur.lower():
+            msg = "Délai de connexion SMTP dépassé. Le port 587 est potentiellement filtré par le pare-feu du VPS LWS. Passez sur le port 465 avec SSL dans votre .env."
+        elif "connection refused" in detail_erreur.lower():
+            msg = "Connexion refusée vers le serveur SMTP Google. Vérifiez le pare-feu de votre serveur VPS."
+        elif "sender address" in detail_erreur.lower() or "553" in detail_erreur:
+            msg = f"Adresse expéditeur rejetée par Google ({settings.DEFAULT_FROM_EMAIL}). Elle doit correspondre à votre compte Gmail."
+        else:
+            msg = f"Impossible d'envoyer l'e-mail ({exc.__class__.__name__} : {exc}). Vérifiez les paramètres SMTP de votre serveur."
+        raise ErreurMetier(msg, code="echec_envoi_email")
 
     return {
         "succes": True,

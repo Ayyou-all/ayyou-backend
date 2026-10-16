@@ -59,6 +59,9 @@ services:
       - ayyou_static_data:/app/staticfiles
     networks:
       - ayyou-reseau
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       service-ia:
         condition: service_healthy

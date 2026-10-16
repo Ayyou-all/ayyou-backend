@@ -247,11 +247,27 @@ EMAIL_BACKEND = os.getenv(
 )
 EMAIL_HOST = os.getenv("AYYOU_EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("AYYOU_EMAIL_PORT", "587"))
-EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", True)
-EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", False)
-EMAIL_HOST_USER = os.getenv("AYYOU_EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.getenv("AYYOU_EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.getenv("AYYOU_DEFAULT_FROM_EMAIL", "AYYOU <contact@ayyou.sn>")
+
+# Configuration automatique TLS / SSL selon le port utilisé
+if EMAIL_PORT == 465:
+    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", True)
+    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", False)
+else:
+    EMAIL_USE_TLS = lire_booleen("AYYOU_EMAIL_USE_TLS", True)
+    EMAIL_USE_SSL = lire_booleen("AYYOU_EMAIL_USE_SSL", False)
+
+EMAIL_TIMEOUT = int(os.getenv("AYYOU_EMAIL_TIMEOUT", "10"))
+EMAIL_HOST_USER = os.getenv("AYYOU_EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("AYYOU_EMAIL_HOST_PASSWORD", "").strip("\"' ")
+
+_default_from_env = os.getenv("AYYOU_DEFAULT_FROM_EMAIL")
+if _default_from_env:
+    DEFAULT_FROM_EMAIL = _default_from_env
+elif EMAIL_HOST_USER:
+    DEFAULT_FROM_EMAIL = f"AYYOU <{EMAIL_HOST_USER}>"
+else:
+    DEFAULT_FROM_EMAIL = "AYYOU <contact@ayyou.site>"
+
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # --- PayTech ------------------------------------------------------------------
