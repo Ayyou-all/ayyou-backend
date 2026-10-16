@@ -1,153 +1,76 @@
-# ==============================================================================
-# FICHIER D'ORCHESTRATION DOCKER COMPOSE — PLATEFORME AYYOU SÉNÉGAL
-# ==============================================================================
-# Services :
-#   - frontend        : Angular 22 compilé, servi par Nginx (Port VPS 2401)
-#   - backend         : Django REST Framework servi par Gunicorn (Port VPS 8888)
-#   - service-ia      : Microservice IA FastAPI (Port VPS 8881, interne port 8000)
-#   - base-de-donnees : PostgreSQL 16 (activable via profil 'postgres')
-# ==============================================================================
-
-name: ayyou-plateforme
-
 services:
-  # ----------------------------------------------------------------------------
-  # 1. FRONTEND ANGULAR 22
-  # ----------------------------------------------------------------------------
-  frontend:
-    build:
-      context: ./ayyouFrontend
-      dockerfile: Dockerfile
-    container_name: ayyou-frontend
-    restart: always
-    ports:
-      # Port VPS spécifié : 2401 redirige vers le Nginx interne port 80
-      - "2401:80"
-    networks:
-      - ayyou-reseau
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/sante"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
-  # ----------------------------------------------------------------------------
-  # 2. BACKEND DJANGO REST FRAMEWORK (Gunicorn)
-  # ----------------------------------------------------------------------------
+  # Base de données PostgreSQL
+  db:
+    image: postgres:16-alpine
+    container_name: ayyou_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ayyou}
+      POSTGRES_USER: ${POSTGRES_USER:-ayyou}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ayyou_mot_de_passe_prod_2026}
+    volumes:
+      # Les données Postgres survivent aux redémarrages et rebuilds du conteneur
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ayyou} -d ${POSTGRES_DB:-ayyou}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # API Django
   backend:
     build:
       context: ./ayyouBackend
       dockerfile: Dockerfile
-    container_name: ayyou-backend
-    restart: always
-    ports:
-      # Port VPS spécifié : 8888 redirige vers Gunicorn interne port 8000
-      - "8888:8000"
+    container_name: ayyou_backend
+    restart: unless-stopped
     env_file:
       - path: .env
+        required: false
+      - path: ./ayyouBackend/.env
         required: false
       - path: ../.env
         required: false
     environment:
-      # Communication interne avec le conteneur FastAPI sur le réseau Docker
-      - AYYOU_SERVICE_IA_URL=http://service-ia:8000
-      - AYYOU_EMAIL_BACKEND=${AYYOU_EMAIL_BACKEND:-}
-      - AYYOU_EMAIL_HOST=${AYYOU_EMAIL_HOST:-smtp.gmail.com}
-      - AYYOU_EMAIL_PORT=${AYYOU_EMAIL_PORT:-465}
-      - AYYOU_EMAIL_USE_SSL=${AYYOU_EMAIL_USE_SSL:-true}
-      - AYYOU_EMAIL_USE_TLS=${AYYOU_EMAIL_USE_TLS:-false}
-      - AYYOU_EMAIL_HOST_USER=${AYYOU_EMAIL_HOST_USER:-}
-      - AYYOU_EMAIL_HOST_PASSWORD=${AYYOU_EMAIL_HOST_PASSWORD:-}
-      - AYYOU_DEFAULT_FROM_EMAIL=${AYYOU_DEFAULT_FROM_EMAIL:-}
+      # Pointeur automatique vers le conteneur PostgreSQL "db"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ayyou}:${POSTGRES_PASSWORD:-ayyou_mot_de_passe_prod_2026}@db:5432/${POSTGRES_DB:-ayyou}
+      AYYOU_SERVICE_IA_URL: http://service-ia:8000
+    ports:
+      - "8888:8000"
     volumes:
-      # Volume persistant pour la base de données SQLite (mode par défaut)
-      - ayyou_sqlite_data:/app/data
-      # Volume persistant pour les fichiers médias téléversés (photos de plats, logos)
-      - ayyou_media_data:/app/medias
-      # Volume pour les fichiers statiques collectés
-      - ayyou_static_data:/app/staticfiles
-    networks:
-      - ayyou-reseau
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
+      # Les médias téléversés survivent aux rebuilds
+      - media_data:/app/medias
     depends_on:
-      service-ia:
+      db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/sante/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 25s
+      service-ia:
+        condition: service_started
 
-  # ----------------------------------------------------------------------------
-  # 3. MICROSERVICE IA FASTAPI (Uvicorn)
-  # ----------------------------------------------------------------------------
+  # Application Angular (Frontend)
+  frontend:
+    build:
+      context: ./ayyouFrontend
+      dockerfile: Dockerfile
+    container_name: ayyou_frontend
+    restart: unless-stopped
+    ports:
+      - "2401:80"
+    depends_on:
+      - backend
+
+  # Microservice IA (FastAPI)
   service-ia:
     build:
       context: ./ayyouServiceIA
       dockerfile: Dockerfile
-    container_name: ayyou-service-ia
-    restart: always
+    container_name: ayyou_service_ia
+    restart: unless-stopped
     ports:
-      # Port VPS spécifié : 8881 pour diagnostics et contrôle externe
       - "8881:8000"
-    env_file:
-      - path: .env
-        required: false
-    networks:
-      - ayyou-reseau
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/sante"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
 
-  # ----------------------------------------------------------------------------
-  # 4. BASE DE DONNÉES POSTGRESQL (Optionnelle, activable via profil 'postgres')
-  # ----------------------------------------------------------------------------
-  base-de-donnees:
-    image: postgres:16-alpine
-    container_name: ayyou-base-de-donnees
-    restart: always
-    profiles:
-      - postgres
-    environment:
-      POSTGRES_DB: ${AYYOU_BDD_NOM:-ayyou}
-      POSTGRES_USER: ${AYYOU_BDD_UTILISATEUR:-ayyou}
-      POSTGRES_PASSWORD: ${AYYOU_BDD_MOT_DE_PASSE:-ayyou_mot_de_passe_prod_2026}
-    volumes:
-      - ayyou_postgres_data:/var/lib/postgresql/data
-    networks:
-      - ayyou-reseau
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-# ==============================================================================
-# VOLUMES PERSISTANTS
-# ==============================================================================
 volumes:
-  # Les données survivent à 'docker compose down' et aux reconstructions d'images
-  ayyou_sqlite_data:
-    name: ayyou_sqlite_data
-  ayyou_postgres_data:
+  postgres_data:
     name: ayyou_postgres_data
-  ayyou_media_data:
+  media_data:
     name: ayyou_media_data
-  ayyou_static_data:
-    name: ayyou_static_data
-
-# ==============================================================================
-# RÉSEAU DOCKER INTERNE
-# ==============================================================================
-networks:
-  ayyou-reseau:
-    name: ayyou-reseau
-    driver: bridge
