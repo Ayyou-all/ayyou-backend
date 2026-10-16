@@ -46,7 +46,6 @@ def lister_courses_disponibles(profil_livreur: ProfilLivreur):
     statuts_eligibles = [
         StatutCommande.PRETE_POUR_RETRAIT,
         StatutCommande.EN_PREPARATION,
-        StatutCommande.CREEE_EN_ATTENTE,
     ]
     return (
         Commande.objects.filter(
@@ -64,6 +63,7 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     """
     Action Livreur (T05) : Accepter la mission de livraison proposée.
     Passe la commande à COURSE_ASSIGNEE et le livreur à OCCUPE.
+    Verrouille la commande avec select_for_update pour éliminer tout risque de double assignation concurrente.
     """
     if profil_livreur.disponibilite != DisponibiliteLivreur.EN_LIGNE and profil_livreur.disponibilite != DisponibiliteLivreur.OCCUPE:
         raise ErreurMetier(
@@ -71,49 +71,45 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
             code="livreur_non_disponible",
         )
 
+    # Verrouillage pessimiste de la ligne en base de données
+    commande_verrouillee = (
+        Commande.objects.select_for_update()
+        .filter(pk=commande.pk)
+        .first()
+    )
+    if commande_verrouillee is None:
+        raise ErreurMetier("Commande introuvable.", code="commande_introuvable")
+
     statuts_acceptables = [
         StatutCommande.PRETE_POUR_RETRAIT,
         StatutCommande.EN_PREPARATION,
-        StatutCommande.CREEE_EN_ATTENTE,
     ]
-    if commande.statut not in statuts_acceptables:
+    if commande_verrouillee.statut not in statuts_acceptables:
         raise ErreurMetier(
-            f"Cette course n'est plus disponible (statut : {commande.statut}).",
+            f"Cette course n'est plus disponible (statut : {commande_verrouillee.statut}).",
             code="course_indisponible",
         )
 
-    if hasattr(commande, "livraison") and commande.livraison:
-        if commande.livraison.livreur == profil_livreur:
-            return commande.livraison
+    livraison_existante = Livraison.objects.filter(commande=commande_verrouillee).first()
+    if livraison_existante is not None:
+        if livraison_existante.livreur == profil_livreur:
+            return livraison_existante
         raise ErreurMetier("Cette commande a déjà été assignée à un autre coursier.", code="course_deja_assignee")
 
-    # Si la commande est encore en attente ou préparation, faire les transitions vers PRETE_POUR_RETRAIT
-    if commande.statut == StatutCommande.CREEE_EN_ATTENTE:
+    # Si la commande est encore en préparation, finaliser la transition vers PRETE_POUR_RETRAIT
+    if commande_verrouillee.statut == StatutCommande.EN_PREPARATION:
         transitionner_statut_commande(
-            commande=commande,
-            nouveau_statut=StatutCommande.EN_PREPARATION,
-            auteur=profil_livreur.utilisateur,
-            commentaire="Prise en charge de la commande pour préparation.",
-        )
-        transitionner_statut_commande(
-            commande=commande,
-            nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
-            auteur=profil_livreur.utilisateur,
-            commentaire="Commande prête pour retrait par le livreur.",
-        )
-    elif commande.statut == StatutCommande.EN_PREPARATION:
-        transitionner_statut_commande(
-            commande=commande,
+            commande=commande_verrouillee,
             nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
             auteur=profil_livreur.utilisateur,
             commentaire="Commande prête pour retrait par le livreur.",
         )
 
     # Gain livreur : part des frais de livraison (ex: 80% des frais de livraison, minimum 1000 FCFA)
-    gain_fcfa = max(int(commande.frais_livraison_fcfa * 0.8), 1000)
+    gain_fcfa = max(int(commande_verrouillee.frais_livraison_fcfa * 0.8), 1000)
 
     livraison = Livraison.objects.create(
-        commande=commande,
+        commande=commande_verrouillee,
         livreur=profil_livreur,
         etape=EtapeLivraison.VERS_RESTAURANT,
         gain_livreur_fcfa=gain_fcfa,
@@ -121,7 +117,7 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
 
     # Transition de la commande vers COURSE_ASSIGNEE
     transitionner_statut_commande(
-        commande=commande,
+        commande=commande_verrouillee,
         nouveau_statut=StatutCommande.COURSE_ASSIGNEE,
         auteur=profil_livreur.utilisateur,
         commentaire=f"Course acceptée par le livreur {profil_livreur.utilisateur.nom_complet}.",
@@ -211,7 +207,8 @@ def valider_livraison_avec_pin(livraison: Livraison, code_pin: str) -> Livraison
     Action Livreur (T09) : Saisie du code PIN client et clôture finale de la livraison.
     Libère le coursier (redevient EN_LIGNE).
     """
-    commande = livraison.commande
+    commande = Commande.objects.get(pk=livraison.commande_id)
+    livraison.commande = commande
     livreur = livraison.livreur
 
     try:

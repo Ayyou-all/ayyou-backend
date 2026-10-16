@@ -48,6 +48,7 @@ TRANSITIONS_COMMANDES_VALIDES: dict[str, set[str]] = {
     },
     StatutCommande.EN_LIVRAISON: {
         StatutCommande.ARRIVE_CLIENT,
+        StatutCommande.LIVREE,
         StatutCommande.ECHEC_LIVRAISON,
     },
     StatutCommande.ARRIVE_CLIENT: {

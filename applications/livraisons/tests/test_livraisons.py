@@ -123,6 +123,41 @@ class TestLivraisons:
         profil.refresh_from_db()
         assert profil.disponibilite == DisponibiliteLivreur.OCCUPE
 
+    def test_commande_non_acceptee_non_proposee_au_livreur(self, environnement_livraison):
+        profil = environnement_livraison["profil_livreur"]
+        commande = environnement_livraison["commande"]
+        # Passer la commande en attente d'acceptation par le restaurant
+        commande.statut = StatutCommande.CREEE_EN_ATTENTE
+        commande.save(update_fields=["statut"])
+
+        courses = lister_courses_disponibles(profil)
+        assert courses.filter(id=commande.id).exists() is False
+
+    def test_double_acceptation_concurrente_rejetee(self, environnement_livraison):
+        profil1 = environnement_livraison["profil_livreur"]
+        commande = environnement_livraison["commande"]
+
+        autre_user = Utilisateur.objects.create_user(
+            courriel="autre.coursier@ayyou.sn",
+            password="Password123!",
+            prenom="Alioune",
+            nom="Fall",
+            telephone="+221771112233",
+            role=Role.LIVREUR,
+        )
+        profil2 = ProfilLivreur.objects.create(
+            utilisateur=autre_user,
+            type_vehicule=TypeVehicule.SCOOTER,
+            statut_validation=StatutValidationPartenaire.ACTIF,
+            disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        )
+
+        accepter_mission_livraison(commande, profil1)
+
+        with pytest.raises(ErreurMetier) as exc:
+            accepter_mission_livraison(commande, profil2)
+        assert exc.value.code in {"course_deja_assignee", "course_indisponible"}
+
     def test_pointage_articles_et_depart_client(self, environnement_livraison):
         profil = environnement_livraison["profil_livreur"]
         commande = environnement_livraison["commande"]
