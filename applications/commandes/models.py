@@ -64,13 +64,15 @@ def generer_reference_commande() -> str:
 def generer_code_livraison_pin() -> str:
     """
     Génère un code PIN à 4 chiffres sécurisé, avec garantie d'absence de collision
-    parmi les commandes actuellement actives.
+    parmi les commandes actuellement actives. Interdit formellement '0000'.
     """
     try:
         from django.apps import apps
         CommandeModel = apps.get_model("commandes", "Commande")
         for _ in range(50):
             code = generer_code_numerique(4)
+            if code == "0000":
+                continue
             if not CommandeModel.objects.filter(
                 code_livraison_pin=code,
                 statut__in=STATUTS_COMMANDES_EN_COURS,
@@ -78,7 +80,8 @@ def generer_code_livraison_pin() -> str:
                 return code
         return generer_code_numerique(6)
     except Exception:
-        return generer_code_numerique(4)
+        code = generer_code_numerique(4)
+        return code if code != "0000" else "1234"
 
 
 class Commande(models.Model):

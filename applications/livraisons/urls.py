@@ -11,6 +11,7 @@ urlpatterns = [
     path("mission-en-cours/arrivee-client/", views.VueArriveeClient.as_view(), name="arrivee-client"),
     path("mission-en-cours/valider-pin/", views.VueCloturerLivraisonPin.as_view(), name="cloturer-pin"),
     path("position-gps/", views.VuePositionGpsLivreur.as_view(), name="position-gps-livreur"),
+    path("position/", views.VuePositionGpsLivreur.as_view(), name="position-livreur"),
     path("disponibilite/", views.VueDisponibiliteLivreur.as_view(), name="disponibilite-livreur"),
     path("profil/", views.VueMonProfilLivreur.as_view(), name="profil-livreur"),
 ]
