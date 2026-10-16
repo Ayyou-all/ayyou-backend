@@ -142,6 +142,12 @@ def demarrer_trajet_vers_client(livraison: Livraison) -> Livraison:
     """Tous les articles sont vérifiés : le livreur part chez le client."""
     verifier_livreur_valide(livraison.livreur)
     commande = Commande.objects.select_for_update().get(pk=livraison.commande_id)
+    livraison.refresh_from_db()
+    if livraison.date_remise_restaurant is None:
+        raise ErreurMetier(
+            "Le restaurant doit d'abord confirmer qu'il vous a remis la commande.",
+            code="remise_non_confirmee",
+        )
     if commande.lignes.filter(est_verifie_par_livreur=False).exists():
         raise ErreurMetier(
             "Veuillez vérifier l'ensemble des articles au comptoir avant le départ.",

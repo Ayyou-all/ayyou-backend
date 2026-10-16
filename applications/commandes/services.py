@@ -345,6 +345,38 @@ def marquer_commande_prete(commande: Commande, gerant) -> Commande:
     )
 
 
+@transaction.atomic
+def confirmer_remise_au_livreur(commande: Commande, gerant) -> Commande:
+    """
+    Le restaurant confirme avoir remis le sac au livreur assigné.
+    Sans cette confirmation, le livreur ne peut pas démarrer le trajet vers le client.
+    """
+    from applications.livraisons.models import Livraison
+    from applications.notifications.services import creer_notification
+
+    _verifier_gerant(commande, gerant)
+    commande = Commande.objects.select_for_update().get(pk=commande.pk)
+    livraison = Livraison.objects.select_for_update().filter(commande=commande).first()
+    if livraison is None:
+        raise ErreurMetier("Aucun livreur n'est encore assigné à cette commande.", code="aucun_livreur")
+    if commande.statut not in (StatutCommande.COURSE_ASSIGNEE, StatutCommande.EN_VERIFICATION):
+        raise TransitionInterdite("La remise n'est possible que lorsque le livreur est au restaurant.")
+    if livraison.date_remise_restaurant is None:
+        livraison.date_remise_restaurant = timezone.now()
+        livraison.save(update_fields=["date_remise_restaurant"])
+        HistoriqueStatutCommande.objects.create(
+            commande=commande, ancien_statut=commande.statut, nouveau_statut=commande.statut,
+            auteur=gerant, commentaire="Le restaurant a remis la commande au livreur.",
+        )
+        creer_notification(
+            destinataire=livraison.livreur.utilisateur,
+            titre=f"Commande {commande.reference} remise",
+            message="Le restaurant confirme vous avoir remis la commande. Vérifiez les articles puis partez chez le client.",
+            reference_commande=commande.reference,
+        )
+    return commande
+
+
 STATUTS_ANNULABLES_PAR_CLIENT = (StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.CREEE_EN_ATTENTE)
 
 

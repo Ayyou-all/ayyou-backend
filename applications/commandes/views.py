@@ -22,7 +22,7 @@ from applications.communs.erreurs import AccesRefuse
 from applications.etablissements.services import obtenir_etablissement_du_gerant
 from applications.utilisateurs.permissions import EstClient, EstGerantEtablissement, EstLivreur
 
-from .models import Commande, HistoriqueStatutCommande, StatutCommande
+from .models import STATUTS_COMMANDES_EN_COURS, Commande, HistoriqueStatutCommande, StatutCommande
 from .serializers import (
     SerializerActionAcceptation,
     SerializerActionRefus,
@@ -35,6 +35,7 @@ from .serializers import (
 )
 from .services import (
     annuler_commande_par_client,
+    confirmer_remise_au_livreur,
     accepter_commande_par_restaurant,
     creer_commande_depuis_panier,
     estimer_montants_commande,
@@ -147,11 +148,19 @@ class VueCommandesRestaurant(generics.ListAPIView):
         queryset = (
             Commande.objects.filter(etablissement=etablissement)
             .exclude(statut=StatutCommande.EN_ATTENTE_PAIEMENT)
-            .select_related("client")
+            .select_related("client", "livraison__livreur__utilisateur")
             .prefetch_related("lignes")
         )
         if statut := self.request.query_params.get("statut"):
             queryset = queryset.filter(statut=statut)
+        if self.request.query_params.get("vue") == "jour":
+            # Tableau de cuisine : commandes encore en cours + commandes du jour (évite de tout recharger).
+            from django.db.models import Q
+            from django.utils import timezone
+
+            queryset = queryset.filter(
+                Q(statut__in=STATUTS_COMMANDES_EN_COURS) | Q(date_creation__date=timezone.localdate())
+            )
         return queryset
 
 
@@ -222,6 +231,16 @@ class VueMarquerPreteCommande(APIView):
         commande = get_commande_par_pk_ou_reference(pk)
         commande_maj = marquer_commande_prete(commande, request.user)
         return Response(SerializerCommandeRestaurant(commande_maj).data)
+
+
+class VueRemettreAuLivreur(APIView):
+    """POST /api/commandes/<id>/remettre-au-livreur/ : le restaurant confirme la remise du sac au livreur."""
+
+    permission_classes = [EstGerantEtablissement]
+
+    def post(self, request, pk):
+        commande = confirmer_remise_au_livreur(get_commande_par_pk_ou_reference(pk), request.user)
+        return Response(SerializerCommandeRestaurant(commande, context={"request": request}).data)
 
 
 class VueValiderPinLivraison(APIView):
