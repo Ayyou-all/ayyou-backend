@@ -80,6 +80,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Annule les commandes expirées (au plus une fois par minute)
+    "applications.commandes.expirations.MiddlewareExpirations",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -268,6 +270,13 @@ NOMBRE_MAX_ESSAIS_CODE_LIVRAISON = 5
 # Part des frais de livraison reversée au livreur (en %). Le reste revient à la plateforme.
 # Valeur à confirmer par la direction : elle est volontairement configurable.
 PART_LIVREUR_FRAIS_LIVRAISON_POURCENT = int(os.getenv("AYYOU_PART_LIVREUR_POURCENT", "80"))
+# Commission prélevée sur le montant des plats (en %). 0 tant que le modèle économique n'est pas décidé.
+COMMISSION_RESTAURANT_POURCENT = int(os.getenv("AYYOU_COMMISSION_RESTAURANT_POURCENT", "0"))
+
+# Délais métier (en minutes) utilisés par applications/commandes/expirations.py
+DELAI_PAIEMENT_MINUTES = int(os.getenv("AYYOU_DELAI_PAIEMENT_MINUTES", "15"))
+DELAI_ACCEPTATION_RESTAURANT_MINUTES = int(os.getenv("AYYOU_DELAI_ACCEPTATION_RESTAURANT_MINUTES", "5"))
+DELAI_ALERTE_SANS_LIVREUR_MINUTES = int(os.getenv("AYYOU_DELAI_ALERTE_SANS_LIVREUR_MINUTES", "10"))
 URL_FRONTEND = os.getenv("AYYOU_URL_FRONTEND", "http://localhost:4200")
 URL_PUBLIQUE_BACKEND = os.getenv("AYYOU_URL_PUBLIQUE_BACKEND", "http://localhost:8000")
 

@@ -7,6 +7,7 @@ urlpatterns = [
     path("restaurant/", views.VueCommandesRestaurant.as_view(), name="commandes-restaurant"),
     path("estimation/", views.VueEstimationCommande.as_view(), name="estimation-commande"),
     path("<str:pk>/", views.VueDetailCommandeClient.as_view(), name="detail-commande-client"),
+    path("<str:pk>/annuler/", views.VueAnnulerCommandeClient.as_view(), name="annuler-commande-client"),
     path("<str:pk>/accepter/", views.VueAccepterCommande.as_view(), name="accepter-commande"),
     path("<str:pk>/refuser/", views.VueRefuserCommande.as_view(), name="refuser-commande"),
     path("<str:pk>/marquer-prete/", views.VueMarquerPreteCommande.as_view(), name="marquer-prete-commande"),

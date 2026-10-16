@@ -128,6 +128,8 @@ class Commande(models.Model):
     sous_total_fcfa = models.PositiveIntegerField()
     frais_livraison_fcfa = models.PositiveIntegerField()
     total_fcfa = models.PositiveIntegerField()
+    # Commission de la plateforme sur les plats, figée à la création (voir COMMISSION_RESTAURANT_POURCENT)
+    commission_plateforme_fcfa = models.PositiveIntegerField(default=0)
 
     # Code de sécurité à 4 chiffres remis au client et saisi par le livreur
     code_livraison_pin = models.CharField(
