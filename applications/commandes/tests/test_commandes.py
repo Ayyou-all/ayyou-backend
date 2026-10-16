@@ -118,6 +118,8 @@ class TestCycleDeVieCommande:
             etablissement_id=etablissement.id,
             adresse_livraison="Mermoz, Villa 12, Dakar",
             telephone_contact="+221770001122",
+            latitude_livraison=14.6928,
+            longitude_livraison=-17.4467,
         )
 
         assert commande.sous_total_fcfa == 10000
@@ -146,6 +148,8 @@ class TestCycleDeVieCommande:
                 etablissement_id=etablissement.id,
                 adresse_livraison="Dakar",
                 telephone_contact="+221770001122",
+            latitude_livraison=14.6928,
+            longitude_livraison=-17.4467,
             )
         assert "n'est plus disponible" in str(exc.value)
 
@@ -161,6 +165,8 @@ class TestCycleDeVieCommande:
             etablissement_id=etablissement.id,
             adresse_livraison="Plateau, Dakar",
             telephone_contact="+221770001122",
+            latitude_livraison=14.6928,
+            longitude_livraison=-17.4467,
         )
 
         # Simuler paiement validé
@@ -206,6 +212,8 @@ class TestCycleDeVieCommande:
             etablissement_id=etablissement.id,
             adresse_livraison="Dakar",
             telephone_contact="+221770001122",
+            latitude_livraison=14.6928,
+            longitude_livraison=-17.4467,
         )
 
         with pytest.raises(AccesRefuse):

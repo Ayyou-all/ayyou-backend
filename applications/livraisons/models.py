@@ -12,7 +12,7 @@ il décrit l'avancement de la course du point de vue du livreur. Les deux sont m
 from django.conf import settings
 from django.db import models
 
-from applications.communs.choix import StatutValidationPartenaire
+from applications.communs.choix import OperateurMobileMoney, StatutValidationPartenaire
 
 
 class TypeVehicule(models.TextChoices):
@@ -34,6 +34,9 @@ class ProfilLivreur(models.Model):
     nom_vehicule = models.CharField(max_length=80, blank=True, help_text="Ex : Yamaha TMAX")
     immatriculation = models.CharField(max_length=30, blank=True)
     zone_principale = models.CharField(max_length=120, blank=True)
+    # Coordonnées où le livreur reçoit ses gains
+    numero_reversement = models.CharField(max_length=20, blank=True)
+    operateur_reversement = models.CharField(max_length=20, choices=OperateurMobileMoney.choices, blank=True)
     statut_validation = models.CharField(
         max_length=30, choices=StatutValidationPartenaire.choices,
         default=StatutValidationPartenaire.EN_ATTENTE_VALIDATION, db_index=True,

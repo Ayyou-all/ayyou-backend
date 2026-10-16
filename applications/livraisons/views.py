@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from applications.commandes.models import Commande
+from applications.communs.choix import OperateurMobileMoney
 from applications.communs.erreurs import ErreurMetier
 from applications.communs.fichiers import valider_document, valider_image
 from applications.utilisateurs.permissions import EstLivreur
@@ -260,6 +261,18 @@ class VueMonProfilLivreur(APIView):
         zone_principale = data.get("zone_principale") or data.get("zonePrincipale") or data.get("zoneActivite")
         if zone_principale is not None:
             profil.zone_principale = str(zone_principale).strip()
+            profil_modifie = True
+
+        numero_reversement = data.get("numero_reversement")
+        if numero_reversement is not None:
+            profil.numero_reversement = str(numero_reversement).replace(" ", "")
+            profil_modifie = True
+
+        operateur_reversement = data.get("operateur_reversement")
+        if operateur_reversement:
+            if operateur_reversement not in OperateurMobileMoney.values:
+                raise ErreurMetier("Opérateur Mobile Money inconnu.", code="operateur_invalide")
+            profil.operateur_reversement = operateur_reversement
             profil_modifie = True
 
         if profil_modifie:

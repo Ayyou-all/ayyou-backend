@@ -29,12 +29,14 @@ from .serializers import (
     SerializerCommandeClient,
     SerializerCommandeRestaurant,
     SerializerCreationCommande,
+    SerializerEstimationCommande,
     SerializerHistoriqueStatut,
     SerializerValidationPin,
 )
 from .services import (
     accepter_commande_par_restaurant,
     creer_commande_depuis_panier,
+    estimer_montants_commande,
     marquer_commande_prete,
     refuser_commande_par_restaurant,
 )
@@ -66,17 +68,40 @@ class VueCommandesClient(generics.ListCreateAPIView):
             client=request.user,
             etablissement_id=donnees["etablissement_id"],
             adresse_livraison=donnees["adresse_livraison"],
-            telephone_contact=donnees.get("telephone_contact") or request.user.telephone,
-            instructions_livraison=donnees.get("instructions_livraison", ""),
-            mode_paiement=donnees.get("mode_paiement"),
-            latitude_livraison=donnees.get("latitude_livraison"),
-            longitude_livraison=donnees.get("longitude_livraison"),
-            source_video_id=donnees.get("source_video_id", ""),
+            latitude_livraison=donnees["latitude_livraison"],
+            longitude_livraison=donnees["longitude_livraison"],
+            telephone_contact=donnees["telephone_contact"],
+            repere_livraison=donnees["repere_livraison"],
+            instructions_livraison=donnees["instructions_livraison"],
+            mode_paiement=donnees["mode_paiement"],
+            source_video_id=donnees["source_video_id"],
             articles_payload=donnees.get("articles"),
         )
 
         reponse_serializer = SerializerCommandeClient(commande, context={"request": request})
         return Response(reponse_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class VueEstimationCommande(APIView):
+    """
+    POST /api/commandes/estimation/
+    Renvoie sous-total, frais de livraison et total exacts pour la position choisie,
+    AVANT de créer la commande. Le total affiché est celui qui sera payé.
+    """
+
+    permission_classes = [EstClient]
+
+    def post(self, request):
+        serializer = SerializerEstimationCommande(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        donnees = serializer.validated_data
+        montants = estimer_montants_commande(
+            etablissement_id=donnees["etablissement_id"],
+            articles=donnees["articles"],
+            latitude=donnees["latitude_livraison"],
+            longitude=donnees["longitude_livraison"],
+        )
+        return Response(montants)
 
 
 class VueDetailCommandeClient(generics.RetrieveAPIView):

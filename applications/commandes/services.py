@@ -61,128 +61,115 @@ TRANSITIONS_COMMANDES_VALIDES: dict[str, set[str]] = {
 }
 
 
+def obtenir_etablissement_recevable(etablissement_id: int) -> Etablissement:
+    """L'établissement doit exister, être validé, ouvert et dans ses horaires."""
+    etablissement = Etablissement.objects.filter(pk=etablissement_id).first()
+    if etablissement is None:
+        raise ErreurMetier("Établissement introuvable.", code="etablissement_introuvable")
+    if not etablissement.peut_recevoir_commandes:
+        raise ErreurMetier(
+            f"« {etablissement.nom} » ne prend pas de commande pour le moment (fermé ou non validé).",
+            code="etablissement_ferme",
+        )
+    return etablissement
+
+
+def preparer_lignes_commande(etablissement: Etablissement, articles: list) -> tuple[list, int]:
+    """
+    Vérifie chaque article demandé et calcule le sous-total avec les prix ACTUELS en base.
+    `articles` : [{"plat_id": 12, "quantite": 2, "instructions_speciales": ""}, ...]
+    Renvoie (lignes à créer, sous-total en FCFA).
+    """
+    from applications.catalogue.models import Plat
+
+    identifiants = [article["plat_id"] for article in articles]
+    plats = {plat.id: plat for plat in Plat.objects.filter(id__in=identifiants, etablissement=etablissement)}
+
+    lignes = []
+    sous_total_fcfa = 0
+    for article in articles:
+        plat = plats.get(article["plat_id"])
+        if plat is None:
+            raise ErreurMetier(
+                f"Le plat n°{article['plat_id']} n'appartient pas à cet établissement.",
+                code="plat_invalide",
+                details={"plat_id": article["plat_id"]},
+            )
+        if not plat.est_commandable:
+            raise ErreurMetier(
+                f"Le plat « {plat.nom} » n'est plus disponible.",
+                code="plat_indisponible",
+                details={"plat_id": plat.id, "plat_nom": plat.nom},
+            )
+        quantite = article["quantite"]
+        sous_total_fcfa += plat.prix_fcfa * quantite
+        lignes.append({
+            "plat": plat,
+            "nom_plat": plat.nom,
+            "prix_unitaire_fcfa": plat.prix_fcfa,
+            "quantite": quantite,
+            "instructions_speciales": article.get("instructions_speciales", ""),
+        })
+
+    if not lignes:
+        raise ErreurMetier("Le panier ne contient aucun article pour cet établissement.", code="panier_vide")
+    return lignes, sous_total_fcfa
+
+
+def articles_depuis_panier(client, etablissement: Etablissement) -> list:
+    """Transforme les lignes du panier serveur d'un restaurant en liste d'articles."""
+    return [
+        {"plat_id": ligne.plat_id, "quantite": ligne.quantite, "instructions_speciales": ligne.instructions_speciales}
+        for ligne in LignePanier.objects.filter(client=client, plat__etablissement=etablissement)
+    ]
+
+
+def estimer_montants_commande(etablissement_id: int, articles: list, latitude, longitude) -> dict:
+    """
+    Montants exacts AVANT paiement. La création de commande utilise les mêmes fonctions :
+    le total affiché au client est donc exactement celui envoyé à PayTech.
+    """
+    from applications.livraisons.tarification import calculer_frais_livraison_commande
+
+    etablissement = obtenir_etablissement_recevable(etablissement_id)
+    _, sous_total_fcfa = preparer_lignes_commande(etablissement, articles)
+    frais_livraison_fcfa = calculer_frais_livraison_commande(etablissement, latitude, longitude)
+    return {
+        "sous_total_fcfa": sous_total_fcfa,
+        "frais_livraison_fcfa": frais_livraison_fcfa,
+        "total_fcfa": sous_total_fcfa + frais_livraison_fcfa,
+    }
+
+
 @transaction.atomic
 def creer_commande_depuis_panier(
     client,
     etablissement_id: int,
     adresse_livraison: str,
-    telephone_contact: str,
+    latitude_livraison,
+    longitude_livraison,
+    telephone_contact: str = "",
+    repere_livraison: str = "",
     instructions_livraison: str = "",
     mode_paiement: str = ModePaiement.WAVE,
-    latitude_livraison=None,
-    longitude_livraison=None,
     source_video_id: str = "",
-    articles_payload: list = None,
+    articles_payload: list | None = None,
 ) -> Commande:
     """
-    Crée une commande pour un établissement donné à partir des lignes du panier du client (ou des articles transmis).
-    Tous les prix et frais sont obligatoirement vérifiés et recalculés depuis la base de données.
+    Crée une commande pour un établissement à partir des articles transmis
+    (ou, à défaut, du panier serveur du client pour cet établissement).
+    Prix, frais et total sont TOUJOURS recalculés côté serveur.
     """
-    etablissement = Etablissement.objects.filter(pk=etablissement_id).first()
-    if etablissement is None:
-        raise ErreurMetier("Établissement introuvable.", code="etablissement_introuvable")
-
-    if not etablissement.peut_recevoir_commandes:
-        raise ErreurMetier(
-            f"L'établissement « {etablissement.nom} » n'est pas ouvert ou n'est pas encore validé.",
-            code="etablissement_ferme",
-        )
-
-    sous_total_fcfa = 0
-    lignes_a_creer = []
-
-    if articles_payload:
-        from applications.catalogue.models import Plat
-        plat_ids = []
-        for a in articles_payload:
-            pid = a.get("plat_id")
-            if pid is not None and str(pid).isdigit():
-                plat_ids.append(int(pid))
-
-        plats_db = {
-            p.id: p
-            for p in Plat.objects.filter(
-                id__in=plat_ids,
-                etablissement=etablissement,
-            )
-        }
-        for item in articles_payload:
-            pid = item.get("plat_id")
-            if pid is not None and str(pid).isdigit():
-                pid = int(pid)
-            if pid not in plats_db:
-                raise ErreurMetier(
-                    f"Le plat ID {pid} n'existe pas ou n'appartient pas à cet établissement.",
-                    code="plat_invalide",
-                    details={"plat_id": pid},
-                )
-            plat = plats_db[pid]
-            if not plat.est_commandable:
-                raise ErreurMetier(
-                    f"Le plat « {plat.nom} » n'est plus disponible.",
-                    code="plat_indisponible",
-                    details={"plat_id": plat.id, "plat_nom": plat.nom},
-                )
-            quantite = max(1, int(item.get("quantite", 1)))
-            prix_unitaire = plat.prix_fcfa
-            sous_total_fcfa += prix_unitaire * quantite
-            lignes_a_creer.append(
-                {
-                    "plat": plat,
-                    "nom_plat": plat.nom,
-                    "prix_unitaire_fcfa": prix_unitaire,
-                    "quantite": quantite,
-                    "instructions_speciales": item.get("instructions_speciales", ""),
-                }
-            )
-
-        if not lignes_a_creer:
-            raise ErreurMetier(
-                "Le panier ne contient aucun article valide pour cet établissement.",
-                code="panier_vide",
-            )
-    else:
-        lignes_panier = list(
-            LignePanier.objects.select_for_update()
-            .filter(client=client, plat__etablissement=etablissement)
-            .select_related("plat")
-        )
-
-        if not lignes_panier:
-            raise ErreurMetier(
-                "Votre panier pour cet établissement est vide.",
-                code="panier_vide",
-            )
-
-        for ligne in lignes_panier:
-            plat = ligne.plat
-            if not plat.est_commandable:
-                raise ErreurMetier(
-                    f"Le plat « {plat.nom} » n'est plus disponible.",
-                    code="plat_indisponible",
-                    details={"plat_id": plat.id, "plat_nom": plat.nom},
-                )
-            prix_unitaire = plat.prix_fcfa
-            sous_total_fcfa += prix_unitaire * ligne.quantite
-            lignes_a_creer.append(
-                {
-                    "plat": plat,
-                    "nom_plat": plat.nom,
-                    "prix_unitaire_fcfa": prix_unitaire,
-                    "quantite": ligne.quantite,
-                    "instructions_speciales": ligne.instructions_speciales,
-                }
-            )
-
     from applications.livraisons.tarification import calculer_frais_livraison_commande
-    frais_livraison_fcfa = calculer_frais_livraison_commande(
-        etablissement=etablissement,
-        lat_client=latitude_livraison,
-        lng_client=longitude_livraison,
-    )
-    total_fcfa = sous_total_fcfa + frais_livraison_fcfa
 
-    tel_final = (telephone_contact or getattr(client, "telephone", "") or "770000000").strip()
+    etablissement = obtenir_etablissement_recevable(etablissement_id)
+    articles = articles_payload or articles_depuis_panier(client, etablissement)
+    lignes_a_creer, sous_total_fcfa = preparer_lignes_commande(etablissement, articles)
+    frais_livraison_fcfa = calculer_frais_livraison_commande(etablissement, latitude_livraison, longitude_livraison)
+
+    telephone = (telephone_contact or client.telephone or "").strip()
+    if not telephone:
+        raise ErreurMetier("Un numéro de téléphone est nécessaire pour la livraison.", code="telephone_obligatoire")
 
     commande = Commande.objects.create(
         client=client,
@@ -190,30 +177,22 @@ def creer_commande_depuis_panier(
         statut=StatutCommande.EN_ATTENTE_PAIEMENT,
         mode_paiement=mode_paiement,
         adresse_livraison=adresse_livraison.strip(),
-        telephone_contact=tel_final,
+        repere_livraison=repere_livraison.strip(),
+        telephone_contact=telephone,
         instructions_livraison=instructions_livraison.strip(),
         latitude_livraison=latitude_livraison,
         longitude_livraison=longitude_livraison,
         sous_total_fcfa=sous_total_fcfa,
         frais_livraison_fcfa=frais_livraison_fcfa,
-        total_fcfa=total_fcfa,
+        total_fcfa=sous_total_fcfa + frais_livraison_fcfa,
         source_video_id=source_video_id.strip(),
     )
+    for ligne in lignes_a_creer:
+        LigneCommande.objects.create(commande=commande, **ligne)
 
-    for item in lignes_a_creer:
-        LigneCommande.objects.create(
-            commande=commande,
-            plat=item["plat"],
-            nom_plat=item["nom_plat"],
-            prix_unitaire_fcfa=item["prix_unitaire_fcfa"],
-            quantite=item["quantite"],
-            instructions_speciales=item["instructions_speciales"],
-        )
-
-    # Vider le sous-panier de cet établissement
+    # Le panier de ce restaurant est vidé : la commande en attente de paiement le remplace.
     vider_panier(client, etablissement_id=etablissement.id)
 
-    # Trace d'audit initiale
     HistoriqueStatutCommande.objects.create(
         commande=commande,
         ancien_statut="",
@@ -221,7 +200,6 @@ def creer_commande_depuis_panier(
         auteur=client,
         commentaire="Création de la commande, en attente de paiement mobile.",
     )
-
     return commande
 
 

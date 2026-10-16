@@ -3,6 +3,13 @@
 from django.db import models
 
 
+class OperateurMobileMoney(models.TextChoices):
+    """Opérateur sur lequel un partenaire reçoit ses reversements."""
+
+    WAVE = "WAVE", "Wave"
+    ORANGE_MONEY = "ORANGE_MONEY", "Orange Money"
+
+
 class StatutValidationPartenaire(models.TextChoices):
     """
     Cycle de validation d'un partenaire (restaurant, livreur).

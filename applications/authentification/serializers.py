@@ -9,6 +9,7 @@ type_vehicule, adresse, conditions_acceptees.
 from django.contrib.auth import password_validation
 from rest_framework import serializers
 
+from applications.communs.choix import OperateurMobileMoney
 from applications.communs.fichiers import valider_document, valider_image
 from applications.livraisons.models import TypeVehicule
 from applications.utilisateurs.models import ROLES_GERANTS, ROLES_INSCRIPTION_PUBLIQUE, Role, TypeDocument, Utilisateur
@@ -37,6 +38,17 @@ class SerializerInscription(serializers.Serializer):
     couverture = serializers.FileField(required=False, allow_null=True, validators=[valider_image])
     permis_recto = serializers.FileField(required=False, allow_null=True, validators=[valider_document])
     permis_verso = serializers.FileField(required=False, allow_null=True, validators=[valider_document])
+    # Restaurant : position réelle, horaires et délai annoncé
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    specialite = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    heure_ouverture = serializers.TimeField(required=False, allow_null=True)
+    heure_fermeture = serializers.TimeField(required=False, allow_null=True)
+    jours_ouverture = serializers.RegexField(r"^[0-6](,[0-6])*$", required=False, default="0,1,2,3,4,5,6")
+    delai_livraison_texte = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
+    # Livreur (et restaurant) : où recevoir les reversements
+    numero_reversement = serializers.RegexField(r"^\+?[0-9 ]{9,20}$", required=False, allow_blank=True, default="")
+    operateur_reversement = serializers.ChoiceField(choices=OperateurMobileMoney.choices, required=False, allow_blank=True, default="")
 
     def validate_courriel(self, courriel):
         courriel = courriel.lower().strip()
@@ -66,6 +78,13 @@ class SerializerInscription(serializers.Serializer):
             raise serializers.ValidationError({"nom_etablissement": "Le nom de l'établissement est obligatoire."})
         if donnees["role"] == Role.LIVREUR and not donnees.get("type_vehicule"):
             raise serializers.ValidationError({"type_vehicule": "Le type de véhicule est obligatoire."})
+        if donnees["role"] in ROLES_GERANTS:
+            # La position du restaurant sert au calcul des frais et au dispatch des livreurs.
+            if donnees.get("latitude") is None or donnees.get("longitude") is None:
+                raise serializers.ValidationError({"latitude": "La position GPS du restaurant est obligatoire."})
+            from applications.livraisons.tarification import valider_eligibilite_zone_livraison
+
+            valider_eligibilite_zone_livraison(donnees["latitude"], donnees["longitude"])
         # Validateurs Django (longueur minimale 6 caractères).
         utilisateur_temporaire = Utilisateur(courriel=donnees["courriel"], prenom=donnees["prenom"], nom=donnees["nom"])
         try:

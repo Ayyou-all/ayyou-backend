@@ -116,6 +116,9 @@ class Commande(models.Model):
 
     # Coordonnées et livraison
     adresse_livraison = models.CharField(max_length=255)
+    repere_livraison = models.CharField(
+        max_length=255, blank=True, help_text="Point de repère, ex : derrière la mosquée, portail bleu"
+    )
     telephone_contact = models.CharField(max_length=30)
     instructions_livraison = models.TextField(blank=True)
     latitude_livraison = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -157,7 +160,8 @@ class Commande(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["code_livraison_pin"],
-                condition=models.Q(statut__in=STATUTS_COMMANDES_EN_COURS),
+                # Liste triée (et non un ensemble) pour que les migrations restent stables.
+                condition=models.Q(statut__in=sorted(STATUTS_COMMANDES_EN_COURS)),
                 name="uniq_pin_commande_active",
             )
         ]
