@@ -61,6 +61,10 @@ class SerializerCommandeClient(serializers.ModelSerializer):
     date_heure_texte = serializers.SerializerMethodField()
     delai_ou_remarque = serializers.SerializerMethodField()
     montant_total_fcfa = serializers.IntegerField(source="total_fcfa", read_only=True)
+    sous_total_fcfa = serializers.IntegerField(read_only=True)
+    frais_livraison_fcfa = serializers.IntegerField(read_only=True)
+    total_fcfa = serializers.IntegerField(read_only=True)
+    statut_paiement = serializers.SerializerMethodField()
     code_livraison = serializers.SerializerMethodField()
     articles = SerializerLigneCommande(source="lignes", many=True, read_only=True)
     livreur = serializers.SerializerMethodField()
@@ -82,8 +86,12 @@ class SerializerCommandeClient(serializers.ModelSerializer):
             "date_heure_texte",
             "statut",
             "statut_libelle",
+            "statut_paiement",
             "delai_ou_remarque",
+            "sous_total_fcfa",
+            "frais_livraison_fcfa",
             "montant_total_fcfa",
+            "total_fcfa",
             "code_livraison",
             "livreur",
             "etape_suivi",
@@ -104,6 +112,13 @@ class SerializerCommandeClient(serializers.ModelSerializer):
 
     def get_date_heure_texte(self, obj):
         return obj.date_creation.strftime("%d/%m/%Y, %H:%M")
+
+    def get_statut_paiement(self, obj):
+        if obj.statut == StatutCommande.EN_ATTENTE_PAIEMENT:
+            return "EN_ATTENTE"
+        if obj.statut in {StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON}:
+            return "ANNULE"
+        return "PAYE"
 
     def get_delai_ou_remarque(self, obj):
         if obj.motif_refus_ou_annulation:
@@ -231,6 +246,14 @@ class SerializerCreationCommande(serializers.Serializer):
         if value is not None:
             return round(float(value), 6)
         return value
+
+    def validate(self, attrs):
+        lat = attrs.get("latitude_livraison")
+        lng = attrs.get("longitude_livraison")
+        if lat is not None and lng is not None:
+            from applications.livraisons.tarification import valider_eligibilite_zone_livraison
+            valider_eligibilite_zone_livraison(lat, lng)
+        return attrs
 
 
 class SerializerActionAcceptation(serializers.Serializer):
