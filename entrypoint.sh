@@ -1,29 +1,40 @@
 #!/bin/sh
+# Ce script tourne à chaque démarrage du conteneur backend.
 set -e
-
-echo "=== [AYYOU Backend] Démarrage du conteneur ==="
 
 # Création des répertoires indispensables s'ils n'existent pas
 mkdir -p /app/data /app/medias /app/staticfiles
 
-# Attente de PostgreSQL si configuré
-if [ "${AYYOU_MOTEUR_BDD}" = "postgresql" ]; then
-  echo "Attente de la base de données PostgreSQL (${AYYOU_BDD_HOTE:-base-de-donnees}:${AYYOU_BDD_PORT:-5432})..."
-  while ! nc -z "${AYYOU_BDD_HOTE:-base-de-donnees}" "${AYYOU_BDD_PORT:-5432}" 2>/dev/null; do
-    sleep 1
-  done
-  echo "PostgreSQL est prêt !"
-fi
+echo "Attente de la base de données Postgres..."
+# On essaie de se connecter à Postgres toutes les secondes, jusqu'à ce
+# que ce soit prêt (au premier démarrage, Postgres met quelques secondes
+# à être disponible).
+python -c "
+import os, sys, time
+import psycopg
 
-# Collecte des fichiers statiques
-echo "Collecte des fichiers statiques..."
-python manage.py collectstatic --noinput
+url = os.environ.get('DATABASE_URL', '')
+if url:
+    for _ in range(30):
+        try:
+            psycopg.connect(url.replace('postgres://', 'postgresql://'), connect_timeout=2).close()
+            break
+        except Exception:
+            time.sleep(1)
+    else:
+        sys.exit('Impossible de joindre la base de données.')
+"
+echo "Base de données prête."
 
-# Application des migrations de base de données
 echo "Application des migrations..."
 python manage.py migrate --noinput
 
-echo "=== [AYYOU Backend] Prêt à recevoir des requêtes ==="
+echo "Collecte des fichiers statiques..."
+python manage.py collectstatic --noinput
 
-# Exécution de la commande principale (Gunicorn par défaut)
-exec "$@"
+echo "Démarrage du serveur..."
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+else
+    exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 75
+fi

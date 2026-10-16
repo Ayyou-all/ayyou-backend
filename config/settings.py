@@ -10,6 +10,7 @@ et ne sont donc pas traduits.
 import os
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -102,29 +103,56 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # --- Base de données ----------------------------------------------------------
-# SQLite par défaut. Pour PostgreSQL : AYYOU_MOTEUR_BDD=postgresql + variables ci-dessous
-# + installation du pilote `psycopg` (voir docs/migration-postgresql.md).
-MOTEUR_BDD = os.getenv("AYYOU_MOTEUR_BDD", "sqlite").lower()
+# Support prioritaire de DATABASE_URL (format: postgresql://USER:PASS@HOST:PORT/DBNAME)
+# Si DATABASE_URL est absent : SQLite par défaut (idéal pour le développement local).
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-if MOTEUR_BDD == "postgresql":
+if DATABASE_URL:
+    url_bdd = urlparse(DATABASE_URL)
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("AYYOU_BDD_NOM", "ayyou"),
-            "USER": os.getenv("AYYOU_BDD_UTILISATEUR", "ayyou"),
-            "PASSWORD": os.getenv("AYYOU_BDD_MOT_DE_PASSE", ""),
-            "HOST": os.getenv("AYYOU_BDD_HOTE", "localhost"),
-            "PORT": os.getenv("AYYOU_BDD_PORT", "5432"),
+            "NAME": url_bdd.path.lstrip("/"),
+            "USER": unquote(url_bdd.username or ""),
+            "PASSWORD": unquote(url_bdd.password or ""),
+            "HOST": url_bdd.hostname or "localhost",
+            "PORT": str(url_bdd.port or 5432),
             "CONN_MAX_AGE": 60,
         }
     }
 else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / os.getenv("AYYOU_BDD_FICHIER_SQLITE", "db.sqlite3"),
+    MOTEUR_BDD = (os.getenv("AYYOU_MOTEUR_BDD") or os.getenv("DB_ENGINE") or "sqlite").strip().lower()
+
+    if MOTEUR_BDD in ("postgresql", "postgres", "psql"):
+        _nom_bdd = os.getenv("AYYOU_BDD_NOM") or os.getenv("POSTGRES_DB") or os.getenv("DB_NAME", "ayyou")
+        _user_bdd = os.getenv("AYYOU_BDD_UTILISATEUR") or os.getenv("POSTGRES_USER") or os.getenv("DB_USER", "ayyou")
+        _pass_bdd = os.getenv("AYYOU_BDD_MOT_DE_PASSE") or os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD", "")
+        _hote_bdd = os.getenv("AYYOU_BDD_HOTE") or os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST", "localhost")
+        _port_bdd = os.getenv("AYYOU_BDD_PORT") or os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT", "5432")
+
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": _nom_bdd,
+                "USER": _user_bdd,
+                "PASSWORD": _pass_bdd,
+                "HOST": _hote_bdd,
+                "PORT": _port_bdd,
+                "CONN_MAX_AGE": 60,
+            }
         }
-    }
+    else:
+        fichier_bdd = os.getenv("AYYOU_BDD_FICHIER_SQLITE")
+        if not fichier_bdd:
+            fichier_bdd = "data/db.sqlite3" if (BASE_DIR / "data").is_dir() else "db.sqlite3"
+        chemin_bdd = BASE_DIR / fichier_bdd
+        chemin_bdd.parent.mkdir(parents=True, exist_ok=True)
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": chemin_bdd,
+            }
+        }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
