@@ -47,9 +47,19 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: ../.env
+        required: false
     environment:
       # Communication interne avec le conteneur FastAPI sur le réseau Docker
       - AYYOU_SERVICE_IA_URL=http://service-ia:8000
+      - AYYOU_EMAIL_BACKEND=${AYYOU_EMAIL_BACKEND:-}
+      - AYYOU_EMAIL_HOST=${AYYOU_EMAIL_HOST:-smtp.gmail.com}
+      - AYYOU_EMAIL_PORT=${AYYOU_EMAIL_PORT:-465}
+      - AYYOU_EMAIL_USE_SSL=${AYYOU_EMAIL_USE_SSL:-true}
+      - AYYOU_EMAIL_USE_TLS=${AYYOU_EMAIL_USE_TLS:-false}
+      - AYYOU_EMAIL_HOST_USER=${AYYOU_EMAIL_HOST_USER:-}
+      - AYYOU_EMAIL_HOST_PASSWORD=${AYYOU_EMAIL_HOST_PASSWORD:-}
+      - AYYOU_DEFAULT_FROM_EMAIL=${AYYOU_DEFAULT_FROM_EMAIL:-}
     volumes:
       # Volume persistant pour la base de données SQLite (mode par défaut)
       - ayyou_sqlite_data:/app/data
