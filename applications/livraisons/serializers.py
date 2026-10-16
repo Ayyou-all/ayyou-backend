@@ -20,10 +20,31 @@ class SerializerArticleVerification(serializers.Serializer):
     est_verifie = serializers.BooleanField(source="est_verifie_par_livreur")
 
 
+def _coordonnees(latitude, longitude):
+    """Renvoie (lat, lng) en float, ou (None, None) si la position n'est pas connue."""
+    if latitude is None or longitude is None:
+        return None, None
+    return float(latitude), float(longitude)
+
+
+def _distance_restaurant_client_km(commande):
+    """Distance à vol d'oiseau restaurant → client, ou None si une position manque."""
+    from .tarification import calculer_distance_orthodromique_km
+
+    lat_resto, lng_resto = _coordonnees(commande.etablissement.latitude, commande.etablissement.longitude)
+    lat_client, lng_client = _coordonnees(commande.latitude_livraison, commande.longitude_livraison)
+    if None in (lat_resto, lat_client):
+        return None
+    return round(calculer_distance_orthodromique_km(lat_resto, lng_resto, lat_client, lng_client), 1)
+
+
 class SerializerPropositionLivraison(serializers.Serializer):
     """
-    Format exact de l'écran « Proposition de livraison » côté livreur.
-    Fournit à la fois les conventions camelCase et snake_case pour une interopérabilité complète.
+    Course proposée à un livreur AVANT acceptation.
+
+    Sécurité : aucune donnée personnelle du client (nom, téléphone, adresse, position exacte)
+    n'est envoyée tant que le livreur n'a pas accepté la course.
+    Les champs existent en camelCase et snake_case car l'écran Angular lit les deux.
     """
 
     identifiantCommande = serializers.CharField(source="reference")
@@ -36,119 +57,52 @@ class SerializerPropositionLivraison(serializers.Serializer):
     restaurant_adresse = serializers.CharField(source="etablissement.adresse")
     restaurantTelephone = serializers.CharField(source="etablissement.telephone")
     restaurant_telephone = serializers.CharField(source="etablissement.telephone")
-    comptoirRetrait = serializers.SerializerMethodField()
-    clientNom = serializers.CharField(source="client.nom_complet")
-    client_nom = serializers.CharField(source="client.nom_complet")
-    clientTelephone = serializers.CharField(source="telephone_contact")
-    client_telephone = serializers.CharField(source="telephone_contact")
-    clientAdresse = serializers.CharField(source="adresse_livraison")
-    client_adresse = serializers.CharField(source="adresse_livraison")
-    clientInstructions = serializers.CharField(source="instructions_livraison")
-    instructions_client = serializers.CharField(source="instructions_livraison")
+    restaurantLatitude = serializers.SerializerMethodField()
+    restaurant_latitude = serializers.SerializerMethodField()
+    restaurantLongitude = serializers.SerializerMethodField()
+    restaurant_longitude = serializers.SerializerMethodField()
     distanceKm = serializers.SerializerMethodField()
     distance_km = serializers.SerializerMethodField()
     gainFcfa = serializers.SerializerMethodField()
     gain_livreur_fcfa = serializers.SerializerMethodField()
-    tempsRestantSec = serializers.IntegerField(default=30)
-    temps_restant_secondes = serializers.IntegerField(default=30)
-    tempsTrajetMin = serializers.SerializerMethodField()
-    temps_trajet_minutes = serializers.SerializerMethodField()
-    restaurantLatitude = serializers.SerializerMethodField()
-    restaurantLongitude = serializers.SerializerMethodField()
-    clientLatitude = serializers.SerializerMethodField()
-    clientLongitude = serializers.SerializerMethodField()
-    restaurant_latitude = serializers.SerializerMethodField()
-    restaurant_longitude = serializers.SerializerMethodField()
-    client_latitude = serializers.SerializerMethodField()
-    client_longitude = serializers.SerializerMethodField()
     articles = serializers.SerializerMethodField()
 
     def get_restaurantLatitude(self, commande):
-        if commande.etablissement and commande.etablissement.latitude:
-            return float(commande.etablissement.latitude)
-        return 14.6710
-
-    def get_restaurantLongitude(self, commande):
-        if commande.etablissement and commande.etablissement.longitude:
-            return float(commande.etablissement.longitude)
-        return -17.4320
-
-    def get_clientLatitude(self, commande):
-        if commande.latitude_livraison:
-            return float(commande.latitude_livraison)
-        return 14.6850
-
-    def get_clientLongitude(self, commande):
-        if commande.longitude_livraison:
-            return float(commande.longitude_livraison)
-        return -17.4520
+        return _coordonnees(commande.etablissement.latitude, commande.etablissement.longitude)[0]
 
     def get_restaurant_latitude(self, commande):
         return self.get_restaurantLatitude(commande)
 
+    def get_restaurantLongitude(self, commande):
+        return _coordonnees(commande.etablissement.latitude, commande.etablissement.longitude)[1]
+
     def get_restaurant_longitude(self, commande):
         return self.get_restaurantLongitude(commande)
 
-    def get_client_latitude(self, commande):
-        return self.get_clientLatitude(commande)
-
-    def get_client_longitude(self, commande):
-        return self.get_clientLongitude(commande)
-
-    def get_comptoirRetrait(self, commande):
-        return f"Guichet AYYOU - {commande.etablissement.nom}"
-
-    def _calculer_distance_reelle_km(self, commande):
-        try:
-            import math
-            lat1 = float(self.get_restaurantLatitude(commande))
-            lon1 = float(self.get_restaurantLongitude(commande))
-            lat2 = float(self.get_clientLatitude(commande))
-            lon2 = float(self.get_clientLongitude(commande))
-
-            # Formule de Haversine
-            r = 6371.0  # Rayon terrestre moyen en kilomètres
-            dlat = math.radians(lat2 - lat1)
-            dlon = math.radians(lon2 - lon1)
-            a = (
-                math.sin(dlat / 2.0) ** 2
-                + math.cos(math.radians(lat1))
-                * math.cos(math.radians(lat2))
-                * math.sin(dlon / 2.0) ** 2
-            )
-            c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-            distance = round(r * c, 1)
-            return max(0.5, distance)
-        except Exception:
-            return 2.5
-
     def get_distanceKm(self, commande):
-        return self._calculer_distance_reelle_km(commande)
+        return _distance_restaurant_client_km(commande)
 
     def get_distance_km(self, commande):
-        return self._calculer_distance_reelle_km(commande)
+        return self.get_distanceKm(commande)
 
     def get_gainFcfa(self, commande):
-        frais = commande.frais_livraison_fcfa if commande.frais_livraison_fcfa else 1500
-        return max(int(frais * 0.8), 1000)
+        from .tarification import calculer_gain_livreur
+
+        return calculer_gain_livreur(commande.frais_livraison_fcfa)
 
     def get_gain_livreur_fcfa(self, commande):
         return self.get_gainFcfa(commande)
-
-    def get_tempsTrajetMin(self, commande):
-        distance = self._calculer_distance_reelle_km(commande)
-        # Estimation de trajet moto à Dakar (~25 km/h de moyenne + 5 min récupération / remise)
-        return max(5, round((distance / 25.0) * 60 + 5))
-
-    def get_temps_trajet_minutes(self, commande):
-        return self.get_tempsTrajetMin(commande)
 
     def get_articles(self, commande):
         return SerializerArticleVerification(commande.lignes.all(), many=True).data
 
 
 class SerializerLivraisonEnCours(serializers.ModelSerializer):
+    """Course acceptée : le livreur assigné reçoit les coordonnées du client pour livrer."""
+
+    commande_id = serializers.IntegerField(source="commande.id", read_only=True)
     commande_reference = serializers.CharField(source="commande.reference", read_only=True)
+    statut_commande = serializers.CharField(source="commande.statut", read_only=True)
     restaurant_nom = serializers.CharField(source="commande.etablissement.nom", read_only=True)
     restaurant_adresse = serializers.CharField(source="commande.etablissement.adresse", read_only=True)
     restaurant_telephone = serializers.CharField(source="commande.etablissement.telephone", read_only=True)
@@ -160,6 +114,7 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
     restaurant_longitude = serializers.SerializerMethodField()
     client_latitude = serializers.SerializerMethodField()
     client_longitude = serializers.SerializerMethodField()
+    distance_km = serializers.SerializerMethodField()
     articles = serializers.SerializerMethodField()
 
     class Meta:
@@ -168,7 +123,10 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
             "id",
             "etape",
             "gain_livreur_fcfa",
+            "essais_code_echoues",
+            "commande_id",
             "commande_reference",
+            "statut_commande",
             "restaurant_nom",
             "restaurant_adresse",
             "restaurant_telephone",
@@ -180,29 +138,29 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
             "restaurant_longitude",
             "client_latitude",
             "client_longitude",
+            "distance_km",
             "articles",
             "date_assignation",
         ]
 
     def get_restaurant_latitude(self, livraison):
-        if livraison.commande and livraison.commande.etablissement and livraison.commande.etablissement.latitude:
-            return float(livraison.commande.etablissement.latitude)
-        return 14.6710
+        etab = livraison.commande.etablissement
+        return _coordonnees(etab.latitude, etab.longitude)[0]
 
     def get_restaurant_longitude(self, livraison):
-        if livraison.commande and livraison.commande.etablissement and livraison.commande.etablissement.longitude:
-            return float(livraison.commande.etablissement.longitude)
-        return -17.4320
+        etab = livraison.commande.etablissement
+        return _coordonnees(etab.latitude, etab.longitude)[1]
 
     def get_client_latitude(self, livraison):
-        if livraison.commande and livraison.commande.latitude_livraison:
-            return float(livraison.commande.latitude_livraison)
-        return 14.6850
+        cmd = livraison.commande
+        return _coordonnees(cmd.latitude_livraison, cmd.longitude_livraison)[0]
 
     def get_client_longitude(self, livraison):
-        if livraison.commande and livraison.commande.longitude_livraison:
-            return float(livraison.commande.longitude_livraison)
-        return -17.4520
+        cmd = livraison.commande
+        return _coordonnees(cmd.latitude_livraison, cmd.longitude_livraison)[1]
+
+    def get_distance_km(self, livraison):
+        return _distance_restaurant_client_km(livraison.commande)
 
     def get_articles(self, livraison):
         return SerializerArticleVerification(livraison.commande.lignes.all(), many=True).data
@@ -363,4 +321,10 @@ class SerializerPointageArticle(serializers.Serializer):
 
 
 class SerializerChangementDisponibilite(serializers.Serializer):
-    disponibilite = serializers.ChoiceField(choices=DisponibiliteLivreur.choices)
+    disponibilite = serializers.ChoiceField(
+        choices=[DisponibiliteLivreur.EN_LIGNE, DisponibiliteLivreur.HORS_LIGNE]
+    )
+
+
+class SerializerValidationPinLivreur(serializers.Serializer):
+    code_pin = serializers.RegexField(r"^\d{4}$", error_messages={"invalid": "Le PIN contient 4 chiffres."})

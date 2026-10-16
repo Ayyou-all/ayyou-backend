@@ -32,7 +32,7 @@ def lire_liste(nom_variable: str, valeur_par_defaut: str = "") -> list[str]:
 
 
 # --- Sécurité -----------------------------------------------------------------
-DEBUG = lire_booleen("AYYOU_DEBUG", True)
+DEBUG = lire_booleen("AYYOU_DEBUG", False)
 SECRET_KEY = os.getenv("AYYOU_CLE_SECRETE_DJANGO", "")
 if not SECRET_KEY:
     if not DEBUG:
@@ -222,7 +222,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --- CORS (Cross-Origin Resource Sharing) -------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True
+# Toutes les origines sont acceptées en développement uniquement ; en production, seule la liste ci-dessous l'est.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
@@ -235,6 +236,7 @@ CORS_ALLOWED_ORIGINS = [
 ] + [origine for origine in lire_liste("AYYOU_ORIGINES_FRONTEND", "https://ayyou.site,http://localhost:2401,http://127.0.0.1:2401") if origine]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://(www\.)?ayyou\.site$",
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
 ]
@@ -263,6 +265,9 @@ CORS_ALLOW_HEADERS = [
 # --- Paramètres métier AYYOU --------------------------------------------------
 FRAIS_LIVRAISON_PAR_DEFAUT_FCFA = int(os.getenv("AYYOU_FRAIS_LIVRAISON_DEFAUT_FCFA", "1000"))
 NOMBRE_MAX_ESSAIS_CODE_LIVRAISON = 5
+# Part des frais de livraison reversée au livreur (en %). Le reste revient à la plateforme.
+# Valeur à confirmer par la direction : elle est volontairement configurable.
+PART_LIVREUR_FRAIS_LIVRAISON_POURCENT = int(os.getenv("AYYOU_PART_LIVREUR_POURCENT", "80"))
 URL_FRONTEND = os.getenv("AYYOU_URL_FRONTEND", "http://localhost:4200")
 URL_PUBLIQUE_BACKEND = os.getenv("AYYOU_URL_PUBLIQUE_BACKEND", "http://localhost:8000")
 
@@ -311,6 +316,8 @@ PAYTECH_DELAI_ATTENTE_SECONDES = int(os.getenv("PAYTECH_DELAI_ATTENTE_SECONDES",
 
 # --- Service IA (FastAPI) -----------------------------------------------------
 SERVICE_IA_URL = os.getenv("AYYOU_SERVICE_IA_URL", "http://127.0.0.1:8001")
+# La valeur par défaut est conservée pour rester compatible avec le conteneur IA actuel,
+# qui ne reçoit aucune variable d'environnement depuis docker-compose.
 SERVICE_IA_CLE_INTERNE = os.getenv("AYYOU_SERVICE_IA_CLE_INTERNE", "cle-secrete-interne-ayyou-ia-2026")
 SERVICE_IA_DELAI_ATTENTE_SECONDES = int(os.getenv("AYYOU_SERVICE_IA_DELAI_SECONDES", "8"))
 

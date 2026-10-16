@@ -3,6 +3,7 @@
 from django.conf import settings
 from rest_framework import serializers
 
+from applications.communs.fichiers import valider_image
 from applications.communs.outils import construire_url_absolue
 
 from .models import Etablissement
@@ -68,8 +69,8 @@ class SerializerEtablissementPublic(serializers.ModelSerializer):
 class SerializerMonEtablissement(SerializerEtablissementPublic):
     """Vue du gérant : ajoute les champs modifiables et le statut de validation (lecture seule)."""
 
-    logo = serializers.FileField(required=False, allow_null=True, write_only=True)
-    couverture = serializers.FileField(required=False, allow_null=True, write_only=True)
+    logo = serializers.FileField(required=False, allow_null=True, write_only=True, validators=[valider_image])
+    couverture = serializers.FileField(required=False, allow_null=True, write_only=True, validators=[valider_image])
 
     class Meta(SerializerEtablissementPublic.Meta):
         fields = SerializerEtablissementPublic.Meta.fields + [
@@ -82,13 +83,3 @@ class SerializerMonEtablissement(SerializerEtablissementPublic):
             raise serializers.ValidationError("Frais de livraison anormalement élevés (max 10 000 FCFA).")
         return valeur
 
-    def _verifier_image(self, image):
-        if image and image.size > settings.TAILLE_MAX_PHOTO_OCTETS:
-            raise serializers.ValidationError("Image trop volumineuse.")
-        return image
-
-    def validate_logo(self, image):
-        return self._verifier_image(image)
-
-    def validate_couverture(self, image):
-        return self._verifier_image(image)

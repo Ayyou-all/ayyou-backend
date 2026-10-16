@@ -115,7 +115,8 @@ class TestLivraisons:
 
         assert livraison.livreur == profil
         assert livraison.etape == EtapeLivraison.VERS_RESTAURANT
-        assert livraison.gain_livreur_fcfa >= 1000
+        # Gain = part configurable des frais (80 % de 1500 F par défaut), jamais plus que les frais
+        assert livraison.gain_livreur_fcfa == 1200
 
         commande.refresh_from_db()
         assert commande.statut == StatutCommande.COURSE_ASSIGNEE
@@ -201,7 +202,7 @@ class TestLivraisons:
         commande.save()
 
         # Validation avec code PIN exact
-        valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        valider_livraison_avec_pin(profil, commande.code_livraison_pin)
 
         commande.refresh_from_db()
         assert commande.statut == StatutCommande.LIVREE
@@ -243,18 +244,20 @@ class TestLivraisons:
         # 4 tentatives avec un mauvais code PIN
         for _ in range(4):
             with pytest.raises(ErreurMetier) as exc:
-                valider_livraison_avec_pin(livraison, "9999")
+                valider_livraison_avec_pin(profil, "9999")
             assert exc.value.code == "code_pin_invalide"
 
-        # 5ème tentative échouée -> verrouillage immédiat
+        # 5ème tentative échouée -> verrouillage immédiat (compteur enregistré en base)
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, "9999")
-        assert exc.value.code == "tentatives_depassees"
+            valider_livraison_avec_pin(profil, "9999")
+        assert exc.value.code == "livraison_bloquee"
+        livraison.refresh_from_db()
+        assert livraison.essais_code_echoues == 5
 
         # 6ème tentative même avec le bon code PIN -> toujours bloquée
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
-        assert exc.value.code == "tentatives_depassees"
+            valider_livraison_avec_pin(profil, commande.code_livraison_pin)
+        assert exc.value.code == "livraison_bloquee"
 
     def test_rejet_revalidation_commande_deja_livree(self, environnement_livraison):
         profil = environnement_livraison["profil_livreur"]
@@ -270,9 +273,9 @@ class TestLivraisons:
         commande.save()
 
         # Première validation réussie
-        valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        valider_livraison_avec_pin(profil, commande.code_livraison_pin)
 
-        # Seconde validation doit être immédiatement rejetée
+        # Seconde validation : la livraison est terminée, il n'y a plus de livraison active
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
-        assert exc.value.code == "commande_deja_livree"
+            valider_livraison_avec_pin(profil, commande.code_livraison_pin)
+        assert exc.value.code == "aucune_livraison"

@@ -267,3 +267,19 @@ def verifier_code_email(courriel: str, code: str, type_action: str = "INSCRIPTIO
     dernier_code.marquer_utilise()
     return True
 
+
+
+DUREE_VALIDITE_VERIFICATION_MINUTES = 30
+
+
+def courriel_recemment_verifie(courriel: str, type_action: str = "INSCRIPTION") -> bool:
+    """
+    Vrai si l'utilisateur a saisi le bon code pour cette adresse il y a moins de 30 minutes.
+    Empêche de créer un compte en appelant directement l'API d'inscription sans vérifier l'e-mail.
+    """
+    limite = timezone.now() - timedelta(minutes=DUREE_VALIDITE_VERIFICATION_MINUTES)
+    return CodeVerificationEmail.objects.filter(
+        courriel=courriel.strip().lower(),
+        type_action=type_action,
+        date_verification__gte=limite,
+    ).exists()
