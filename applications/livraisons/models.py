@@ -78,6 +78,8 @@ class Livraison(models.Model):
     essais_code_echoues = models.PositiveSmallIntegerField(default=0)
     motif_echec = models.CharField(max_length=255, blank=True)
     date_assignation = models.DateTimeField(auto_now_add=True)
+    # Renseignée quand le restaurant confirme avoir remis la commande au livreur
+    date_remise_restaurant = models.DateTimeField(null=True, blank=True)
     date_recuperation = models.DateTimeField(null=True, blank=True)
     date_livraison = models.DateTimeField(null=True, blank=True)
 

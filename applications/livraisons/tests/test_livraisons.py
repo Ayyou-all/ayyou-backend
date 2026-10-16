@@ -26,6 +26,14 @@ from applications.livraisons.services import (
 from applications.utilisateurs.models import Role, Utilisateur
 
 
+def remise_par_le_restaurant(livraison):
+    """Simule la confirmation du restaurant : « commande remise au livreur »."""
+    from django.utils import timezone
+
+    livraison.date_remise_restaurant = timezone.now()
+    livraison.save(update_fields=["date_remise_restaurant"])
+
+
 @pytest.fixture
 def environnement_livraison(db):
     client = Utilisateur.objects.create_user(
@@ -112,6 +120,7 @@ class TestLivraisons:
         commande = environnement_livraison["commande"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
 
         assert livraison.livreur == profil
         assert livraison.etape == EtapeLivraison.VERS_RESTAURANT
@@ -166,6 +175,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
 
         # Pointer seulement 1 article sur 2
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
@@ -193,6 +203,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)
@@ -235,6 +246,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)
@@ -266,6 +278,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)

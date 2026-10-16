@@ -45,6 +45,14 @@ def client_api(utilisateur=None):
     return api
 
 
+def remise_par_le_restaurant(livraison):
+    """Simule la confirmation du restaurant : « commande remise au livreur »."""
+    from django.utils import timezone
+
+    livraison.date_remise_restaurant = timezone.now()
+    livraison.save(update_fields=["date_remise_restaurant"])
+
+
 @pytest.fixture
 def commande_prete(db):
     client = creer_utilisateur("client.secu@ayyou.sn", "+221770000101", Role.CLIENT)
@@ -68,6 +76,7 @@ class TestSecuriteLivreur:
         livreur_a = creer_livreur("a@ayyou.sn", "+221770000201")
         livreur_b = creer_livreur("b@ayyou.sn", "+221770000202")
         livraison = accepter_mission_livraison(commande_prete, livreur_b)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, commande_prete.lignes.first().id, True)
         demarrer_trajet_vers_client(livraison)
 

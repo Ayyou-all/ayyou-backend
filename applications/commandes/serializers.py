@@ -192,12 +192,15 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
     articles = SerializerLigneCommande(source="lignes", many=True, read_only=True)
 
     livreur = serializers.SerializerMethodField()
+    remise_confirmee = serializers.SerializerMethodField()
 
     class Meta:
         model = Commande
         fields = [
             "id",
             "reference",
+            "remise_confirmee",
+            "source_video_id",
             "statut",
             "client_nom",
             "client_telephone",
@@ -227,6 +230,11 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
             "adressePhoto": construire_url_absolue(req, u.photo) or "",
             "numeroTelephone": u.telephone,
         }
+
+    def get_remise_confirmee(self, obj):
+        """Vrai quand le restaurant a confirmé avoir remis la commande au livreur."""
+        livraison = getattr(obj, "livraison", None)
+        return bool(livraison and livraison.date_remise_restaurant)
 
 
 class SerializerLigneCreation(serializers.Serializer):
