@@ -137,3 +137,21 @@ def test_desactiver_un_livreur_le_met_hors_ligne(support):
     # Un administrateur ne peut pas se désactiver lui-même
     soi = support["api"].post(f"/api/administration/utilisateurs/{support['admin'].id}/basculer-statut/", {}, format="json")
     assert soi.status_code == 400
+
+
+@pytest.mark.django_db
+def test_debloquer_une_livraison_apres_5_pin_errones(support):
+    from applications.livraisons.models import Livraison
+
+    c = commande(support, StatutCommande.ARRIVE_CLIENT)
+    livraison = Livraison.objects.create(commande=c, livreur=support["livreur"], essais_code_echoues=5)
+    detail = support["api"].get("/api/administration/commandes/?statut=EN_COURS").data["results"][0]
+    assert detail["livraisonBloquee"] is True
+
+    reponse = support["api"].post(f"/api/administration/commandes/{c.id}/debloquer/")
+    assert reponse.status_code == 200
+    assert reponse.data["livraisonBloquee"] is False
+    livraison.refresh_from_db()
+    assert livraison.essais_code_echoues == 0
+    # Une livraison non bloquée ne peut pas être « débloquée »
+    assert support["api"].post(f"/api/administration/commandes/{c.id}/debloquer/").status_code == 400

@@ -438,3 +438,31 @@ def admin_retirer_livreur(commande, admin, motif: str):
     )
     commande.refresh_from_db()
     return commande
+
+
+def admin_debloquer_livraison(commande, admin):
+    """
+    Après 5 PIN erronés la livraison est bloquée. Le support a vérifié avec le client
+    (appel téléphonique) : il remet le compteur à zéro pour que le livreur réessaie.
+    Si la remise est impossible, le livreur déclare un échec et le support rembourse.
+    """
+    from applications.commandes.models import HistoriqueStatutCommande
+    from applications.communs.erreurs import ErreurMetier
+    from applications.livraisons.models import Livraison
+    from applications.livraisons.services import livraison_est_bloquee
+
+    livraison = Livraison.objects.select_for_update().filter(commande=commande).select_related("livreur__utilisateur").first()
+    if livraison is None or not livraison_est_bloquee(livraison):
+        raise ErreurMetier("Cette livraison n'est pas bloquée.", code="livraison_non_bloquee")
+    livraison.essais_code_echoues = 0
+    livraison.save(update_fields=["essais_code_echoues"])
+    HistoriqueStatutCommande.objects.create(
+        commande=commande, ancien_statut=commande.statut, nouveau_statut=commande.statut, auteur=admin,
+        commentaire="Livraison débloquée par le support après trop de codes PIN erronés.",
+    )
+    creer_notification(
+        destinataire=livraison.livreur.utilisateur,
+        titre=f"Livraison {commande.reference} débloquée",
+        message="Le support a débloqué la livraison : demandez à nouveau le code PIN au client.",
+        reference_commande=commande.reference,
+    )

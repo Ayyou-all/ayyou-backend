@@ -22,6 +22,7 @@ from .serializers import (
 from .services import (
     admin_annuler_commande,
     admin_assigner_livreur,
+    admin_debloquer_livraison,
     admin_rembourser_commande,
     admin_retirer_livreur,
     appliquer_decision_etablissement,
@@ -200,7 +201,7 @@ class VueCommandesAdministration(generics.ListAPIView):
 class VueActionCommandeAdministration(APIView):
     """
     POST /api/administration/commandes/<id>/<action>/
-    action = annuler {"motif"} | rembourser | assigner-livreur {"livreur_id"} | retirer-livreur {"motif"}
+    action = annuler {"motif"} | rembourser | assigner-livreur {"livreur_id"} | retirer-livreur {"motif"} | debloquer
     Chaque action est enregistrée dans l'historique de la commande avec l'administrateur auteur.
     """
 
@@ -220,6 +221,11 @@ class VueActionCommandeAdministration(APIView):
             admin_assigner_livreur(commande, request.user, int(livreur_id))
         elif action == "retirer-livreur":
             admin_retirer_livreur(commande, request.user, motif)
+        elif action == "debloquer":
+            from django.db import transaction
+
+            with transaction.atomic():
+                admin_debloquer_livraison(commande, request.user)
         else:
             return Response({"message": "Action inconnue."}, status=404)
         commande = (
