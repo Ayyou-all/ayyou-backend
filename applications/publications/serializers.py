@@ -160,6 +160,7 @@ class SerializerStudioVideoItem(serializers.ModelSerializer):
     detailsPlat = serializers.CharField(source="description")
     imageAffiche = serializers.SerializerMethodField()
     videoUrl = serializers.SerializerMethodField()
+    typeMedia = serializers.CharField(source="type_media", read_only=True)  # VIDEO ou IMAGE
     nombreJeaime = serializers.SerializerMethodField()
     nombreVues = serializers.CharField(source="nombre_vues")
     datePublication = serializers.SerializerMethodField()
@@ -172,6 +173,7 @@ class SerializerStudioVideoItem(serializers.ModelSerializer):
             "detailsPlat",
             "imageAffiche",
             "videoUrl",
+            "typeMedia",
             "nombreJeaime",
             "nombreVues",
             "datePublication",

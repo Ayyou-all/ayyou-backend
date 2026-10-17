@@ -238,3 +238,19 @@ def test_like_sans_doublon_et_compteur_reel(donnees_publications):
     assert api.post(f"/api/publications/{publication.id}/like/").json() == {
         "estAime": False, "nombreJeaime": 0, "message": "Mention J'aime retirée."
     }
+
+
+@pytest.mark.django_db
+def test_video_servie_par_morceaux_pour_iphone(settings):
+    """Safari (iPhone) exige des réponses partielles « 206 » pour lire une vidéo."""
+    dossier = settings.MEDIA_ROOT / "publications" / "medias"
+    dossier.mkdir(parents=True)
+    (dossier / "essai.mp4").write_bytes(b"0123456789" * 10)
+
+    client = APIClient()
+    partielle = client.get("/medias/publications/medias/essai.mp4", HTTP_RANGE="bytes=10-19")
+    assert partielle.status_code == 206
+    assert partielle["Content-Range"] == "bytes 10-19/100"
+    assert partielle.content == b"0123456789"
+    assert client.get("/medias/publications/medias/essai.mp4", HTTP_RANGE="bytes=500-").status_code == 416
+    assert client.get("/medias/publications/medias/essai.mp4").status_code == 200
