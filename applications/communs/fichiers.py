@@ -8,6 +8,7 @@ Pourquoi ?
   jamais par l'URL publique /medias/, seulement par une API protégée.
 """
 
+import mimetypes
 import os
 import posixpath
 
@@ -84,6 +85,51 @@ def servir_media_public(request, path):
     chemin = posixpath.normpath(path).lstrip("/")
     if chemin.startswith(DOSSIER_DOCUMENTS_PRIVES):
         raise Http404("Document privé.")
-    if os.path.splitext(chemin)[1].lower() not in EXTENSIONS_SERVIES:
+    extension = os.path.splitext(chemin)[1].lower()
+    if extension not in EXTENSIONS_SERVIES:
         raise Http404("Type de fichier non distribué.")
+    if extension in EXTENSIONS_VIDEOS and request.headers.get("Range"):
+        return servir_morceau_video(request, chemin)
     return serve(request, chemin, document_root=settings.MEDIA_ROOT)
+
+
+TAILLE_MAX_MORCEAU = 2 * 1024 * 1024  # 2 Mo par réponse : adapté aux connexions mobiles
+
+
+def servir_morceau_video(request, chemin):
+    """
+    Répond à une demande partielle « Range: bytes=debut-fin » (code 206).
+    Safari sur iPhone refuse de lire une vidéo sans cela, et c'est ce qui permet
+    d'avancer dans la vidéo sans tout télécharger.
+    """
+    from django.http import HttpResponse
+
+    chemin_complet = os.path.join(settings.MEDIA_ROOT, chemin)
+    if not os.path.isfile(chemin_complet):
+        raise Http404("Fichier introuvable.")
+    taille = os.path.getsize(chemin_complet)
+
+    plage = request.headers["Range"].replace("bytes=", "").split(",")[0].strip()
+    debut_texte, _, fin_texte = plage.partition("-")
+    if debut_texte.isdigit():
+        debut = int(debut_texte)
+        fin = int(fin_texte) if fin_texte.isdigit() else taille - 1
+    elif fin_texte.isdigit():  # « bytes=-500 » : les 500 derniers octets
+        debut, fin = max(0, taille - int(fin_texte)), taille - 1
+    else:
+        return serve(request, chemin, document_root=settings.MEDIA_ROOT)
+    fin = min(fin, taille - 1, debut + TAILLE_MAX_MORCEAU - 1)
+    if debut >= taille or debut > fin:
+        reponse = HttpResponse(status=416)
+        reponse["Content-Range"] = f"bytes */{taille}"
+        return reponse
+
+    with open(chemin_complet, "rb") as fichier:
+        fichier.seek(debut)
+        morceau = fichier.read(fin - debut + 1)
+    type_fichier = mimetypes.guess_type(chemin_complet)[0] or "application/octet-stream"
+    reponse = HttpResponse(morceau, status=206, content_type=type_fichier)
+    reponse["Content-Range"] = f"bytes {debut}-{fin}/{taille}"
+    reponse["Accept-Ranges"] = "bytes"
+    reponse["Content-Length"] = str(len(morceau))
+    return reponse
