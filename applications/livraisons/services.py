@@ -115,10 +115,13 @@ def lister_courses_disponibles(profil_livreur: ProfilLivreur) -> list:
 
 
 @transaction.atomic
-def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur) -> Livraison:
+def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur, assigne_par=None) -> Livraison:
     """
     Le livreur accepte une course. Le serveur décide qui gagne :
     la commande et le profil sont verrouillés, le premier livreur valide l'emporte.
+
+    `assigne_par` : administrateur qui assigne la course à la main ; le rayon de recherche
+    et le GPS ne sont alors pas exigés (les autres règles restent les mêmes).
     """
     profil = ProfilLivreur.objects.select_for_update().select_related("utilisateur").get(pk=profil_livreur.pk)
     verifier_livreur_valide(profil)
@@ -133,7 +136,7 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     commande_verrouillee = Commande.objects.select_for_update().get(pk=commande.pk)
     if commande_verrouillee.statut != StatutCommande.PRETE_POUR_RETRAIT:
         raise ErreurMetier("Cette course n'est plus disponible.", code="course_indisponible")
-    if commande_verrouillee not in lister_courses_disponibles(profil):
+    if assigne_par is None and commande_verrouillee not in lister_courses_disponibles(profil):
         raise ErreurMetier(
             "Cette course ne vous est pas proposée (trop loin, GPS inactif ou course refusée).",
             code="course_non_proposee",
@@ -150,8 +153,12 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     transitionner_statut_commande(
         commande=commande_verrouillee,
         nouveau_statut=StatutCommande.COURSE_ASSIGNEE,
-        auteur=profil.utilisateur,
-        commentaire=f"Course acceptée par le livreur {profil.utilisateur.nom_complet}.",
+        auteur=assigne_par or profil.utilisateur,
+        commentaire=(
+            f"Course assignée par l'administration à {profil.utilisateur.nom_complet}."
+            if assigne_par
+            else f"Course acceptée par le livreur {profil.utilisateur.nom_complet}."
+        ),
     )
     profil.disponibilite = DisponibiliteLivreur.OCCUPE
     profil.save(update_fields=["disponibilite"])
@@ -299,7 +306,7 @@ def refuser_course(profil_livreur: ProfilLivreur, commande: Commande) -> None:
 
 
 @transaction.atomic
-def annuler_course_par_livreur(profil_livreur: ProfilLivreur, motif: str) -> Commande:
+def annuler_course_par_livreur(profil_livreur: ProfilLivreur, motif: str, auteur=None) -> Commande:
     """
     Le livreur annule sa course AVANT d'avoir récupéré la commande.
     La commande redevient « prête » et est reproposée aux autres livreurs ;
@@ -328,8 +335,12 @@ def annuler_course_par_livreur(profil_livreur: ProfilLivreur, motif: str) -> Com
     transitionner_statut_commande(
         commande=commande,
         nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
-        auteur=profil_livreur.utilisateur,
-        commentaire=f"Course annulée par le livreur {profil_livreur.utilisateur.nom_complet} : {motif.strip()}",
+        auteur=auteur or profil_livreur.utilisateur,
+        commentaire=(
+            f"Livreur {profil_livreur.utilisateur.nom_complet} retiré par l'administration : {motif.strip()}"
+            if auteur
+            else f"Course annulée par le livreur {profil_livreur.utilisateur.nom_complet} : {motif.strip()}"
+        ),
     )
     profil_livreur.disponibilite = DisponibiliteLivreur.EN_LIGNE
     profil_livreur.save(update_fields=["disponibilite"])

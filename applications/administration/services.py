@@ -233,7 +233,7 @@ def calculer_statistiques_globales(request=None) -> dict:
             "iconeOuPhoto": logo_url if logo_url else "fa-solid fa-utensils",
             "estPhoto": bool(logo_url),
             "classeFondIcone": "bg-rose-50 text-[#E51824]",
-            "dateInscription": etab.date_creation.strftime("%d %b. %Y") if hasattr(etab, "date_creation") and etab.date_creation else "Récemment",
+            "dateInscription": etab.date_creation.strftime("%d %b. %Y") if hasattr(etab, "date_creation") and etab.date_creation else "",
             "statut": "EN_ATTENTE",
         })
 
@@ -252,7 +252,7 @@ def calculer_statistiques_globales(request=None) -> dict:
             "iconeOuPhoto": photo_url if photo_url else "fa-solid fa-motorcycle",
             "estPhoto": bool(photo_url),
             "classeFondIcone": "bg-amber-50 text-amber-600",
-            "dateInscription": liv.utilisateur.date_creation.strftime("%d %b. %Y") if hasattr(liv, "utilisateur") and getattr(liv.utilisateur, "date_creation", None) else "Récemment",
+            "dateInscription": liv.utilisateur.date_creation.strftime("%d %b. %Y") if hasattr(liv, "utilisateur") and getattr(liv.utilisateur, "date_creation", None) else "",
             "statut": "EN_ATTENTE",
         })
 
@@ -294,18 +294,6 @@ def calculer_statistiques_globales(request=None) -> dict:
         })
         offset_courant += dash_len
 
-    if not commandes_par_categorie:
-        commandes_par_categorie = [
-            {
-                "nom": "Plats locaux",
-                "total": total_commandes,
-                "pourcentage": 100,
-                "dasharray": "238 238",
-                "dashoffset": "0",
-                "couleur": "#E51824",
-            }
-        ]
-
     return {
         # Formats camelCase et snake_case pour rétrocompatibilité totale
         "totalCommandes": total_commandes,
@@ -329,4 +317,124 @@ def calculer_statistiques_globales(request=None) -> dict:
         "commandesParCategorie": commandes_par_categorie,
         "dernieresValidations": dernieres_validations,
         "topRestaurants": top_restaurants,
+        # Argent : ce qui revient à la plateforme et ce qui reste à rembourser
+        "commissionPlateformeFcfa": commandes_payees.aggregate(total=Sum("commission_plateforme_fcfa"))["total"] or 0,
+        "commandesARembourser": sum(
+            1
+            for c in Commande.objects.filter(
+                statut__in=[StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON]
+            ).prefetch_related("tentatives_paiement")
+            if paiement_a_rembourser(c)
+        ),
+        "echecsLivraison": Commande.objects.filter(statut=StatutCommande.ECHEC_LIVRAISON).count(),
+        "commandesEnAttente": Commande.objects.filter(
+            statut__in=[StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.CREEE_EN_ATTENTE]
+        ).count(),
+        "commandesAnnulees": Commande.objects.filter(
+            statut__in=[StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON]
+        ).count(),
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Actions du support sur une commande (toutes tracées dans l'historique)
+# ---------------------------------------------------------------------------
+
+
+def paiement_a_rembourser(commande) -> bool:
+    """Commande terminée sans livraison mais dont un paiement confirmé n'a pas été remboursé."""
+    from applications.paiements.models import StatutPaiement
+
+    return commande.statut in (StatutCommande.REFUSEE_ANNULEE, StatutCommande.ECHEC_LIVRAISON) and any(
+        tentative.statut == StatutPaiement.CONFIRME for tentative in commande.tentatives_paiement.all()
+    )
+
+
+def admin_annuler_commande(commande, admin, motif: str):
+    """
+    Annule une commande pas encore partie chez le client, libère le livreur éventuel
+    et rembourse le client. Une commande en route se termine par la livraison ou un échec déclaré.
+    """
+    from applications.commandes.services import annuler_et_rembourser
+    from applications.communs.erreurs import ErreurMetier
+    from applications.livraisons.models import Livraison
+
+    if not motif.strip():
+        raise ErreurMetier("Le motif est obligatoire.", code="motif_obligatoire")
+    if commande.statut in (StatutCommande.EN_LIVRAISON, StatutCommande.ARRIVE_CLIENT):
+        raise ErreurMetier(
+            "La commande est en route : attendez la livraison ou l'échec déclaré par le livreur, puis remboursez.",
+            code="commande_en_route",
+        )
+    livraison = Livraison.objects.filter(commande=commande).select_related("livreur").first()
+    commande = annuler_et_rembourser(commande, admin, motif=motif.strip(), commentaire=f"Annulation support : {motif.strip()}")
+    if livraison is not None:
+        livraison.livreur.disponibilite = DisponibiliteLivreur.EN_LIGNE
+        livraison.livreur.save(update_fields=["disponibilite"])
+    return commande
+
+
+def admin_rembourser_commande(commande, admin) -> bool:
+    """Relance le remboursement d'une commande annulée ou en échec (si PayTech avait échoué)."""
+    from applications.commandes.models import HistoriqueStatutCommande
+    from applications.communs.erreurs import ErreurMetier
+    from applications.notifications.services import creer_notification
+    from applications.paiements.services import rembourser_paiements_commande
+
+    if not paiement_a_rembourser(commande):
+        raise ErreurMetier("Aucun paiement à rembourser pour cette commande.", code="rien_a_rembourser")
+    rembourse = rembourser_paiements_commande(commande)
+    HistoriqueStatutCommande.objects.create(
+        commande=commande, ancien_statut=commande.statut, nouveau_statut=commande.statut, auteur=admin,
+        commentaire="Remboursement effectué par le support." if rembourse else "Remboursement refusé par PayTech.",
+    )
+    if not rembourse:
+        raise ErreurMetier("PayTech a refusé le remboursement. Réessayez plus tard ou remboursez manuellement.", code="remboursement_echoue")
+    creer_notification(
+        destinataire=commande.client,
+        titre="Remboursement effectué",
+        message=f"Les {commande.total_fcfa} FCFA de la commande {commande.reference} vous ont été remboursés.",
+        reference_commande=commande.reference,
+    )
+    return True
+
+
+def admin_assigner_livreur(commande, admin, livreur_id: int):
+    """Assigne à la main une commande prête à un livreur validé, en ligne et libre."""
+    from applications.communs.erreurs import ErreurMetier
+    from applications.livraisons.services import accepter_mission_livraison
+    from applications.notifications.services import creer_notification
+
+    profil = ProfilLivreur.objects.filter(pk=livreur_id).select_related("utilisateur").first()
+    if profil is None:
+        raise ErreurMetier("Livreur introuvable.", code="livreur_introuvable")
+    livraison = accepter_mission_livraison(commande, profil, assigne_par=admin)
+    creer_notification(
+        destinataire=profil.utilisateur,
+        titre=f"Course {commande.reference} assignée",
+        message=f"L'administration vous a assigné la commande de {commande.etablissement.nom}. Ouvrez l'application.",
+        reference_commande=commande.reference,
+    )
+    return livraison
+
+
+def admin_retirer_livreur(commande, admin, motif: str):
+    """Retire le livreur (avant la remise au restaurant) : la course est reproposée aux autres."""
+    from applications.communs.erreurs import ErreurMetier
+    from applications.livraisons.models import Livraison
+    from applications.livraisons.services import annuler_course_par_livreur
+    from applications.notifications.services import creer_notification
+
+    livraison = Livraison.objects.filter(commande=commande).select_related("livreur__utilisateur").first()
+    if livraison is None:
+        raise ErreurMetier("Aucun livreur assigné à cette commande.", code="aucun_livreur")
+    annuler_course_par_livreur(livraison.livreur, motif, auteur=admin)
+    creer_notification(
+        destinataire=livraison.livreur.utilisateur,
+        titre=f"Course {commande.reference} retirée",
+        message=f"L'administration vous a retiré cette course. Motif : {motif.strip()}",
+        reference_commande=commande.reference,
+    )
+    commande.refresh_from_db()
+    return commande
