@@ -210,6 +210,7 @@ class SerializerCommandeRestaurant(serializers.ModelSerializer):
             "sous_total_fcfa",
             "frais_livraison_fcfa",
             "total_fcfa",
+            "commission_plateforme_fcfa",
             "delai_preparation_estime_minutes",
             "motif_refus_ou_annulation",
             "date_creation",
