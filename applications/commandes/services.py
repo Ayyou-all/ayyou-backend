@@ -46,6 +46,7 @@ TRANSITIONS_COMMANDES_VALIDES: dict[str, set[str]] = {
     StatutCommande.EN_VERIFICATION: {
         StatutCommande.EN_LIVRAISON,
         StatutCommande.REFUSEE_ANNULEE,
+        StatutCommande.PRETE_POUR_RETRAIT,  # le livreur annule avant d'avoir récupéré la commande
     },
     StatutCommande.EN_LIVRAISON: {
         StatutCommande.ARRIVE_CLIENT,

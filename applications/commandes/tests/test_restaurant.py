@@ -31,6 +31,7 @@ def cuisine(db):
     livreur = ProfilLivreur.objects.create(
         utilisateur=creer("l4@ayyou.sn", "+221770004004", Role.LIVREUR),
         statut_validation=StatutValidationPartenaire.ACTIF, disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
     )
     etablissement = Etablissement.objects.create(
         gerant=gerant, nom="Resto 4", nom_utilisateur="resto-4", statut_validation=StatutValidationPartenaire.ACTIF, est_ouvert=True

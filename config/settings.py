@@ -273,6 +273,15 @@ PART_LIVREUR_FRAIS_LIVRAISON_POURCENT = int(os.getenv("AYYOU_PART_LIVREUR_POURCE
 # Commission prélevée sur le montant des plats (en %). 0 tant que le modèle économique n'est pas décidé.
 COMMISSION_RESTAURANT_POURCENT = int(os.getenv("AYYOU_COMMISSION_RESTAURANT_POURCENT", "0"))
 
+# Dispatch : rayon (km) autour du restaurant dans lequel les livreurs voient la course.
+# Le rayon s'élargit tant que personne n'accepte (recherche élargie).
+DISPATCH_RAYON_INITIAL_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_INITIAL_KM", "3"))
+DISPATCH_RAYON_PAS_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_PAS_KM", "2"))
+DISPATCH_MINUTES_PAR_PAS = int(os.getenv("AYYOU_DISPATCH_MINUTES_PAR_PAS", "2"))
+DISPATCH_RAYON_MAX_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_MAX_KM", "15"))
+# Une position GPS plus ancienne que ce délai n'est plus considérée comme fiable.
+GPS_POSITION_VALIDE_MINUTES = int(os.getenv("AYYOU_GPS_POSITION_VALIDE_MINUTES", "5"))
+
 # Délais métier (en minutes) utilisés par applications/commandes/expirations.py
 DELAI_PAIEMENT_MINUTES = int(os.getenv("AYYOU_DELAI_PAIEMENT_MINUTES", "15"))
 DELAI_ACCEPTATION_RESTAURANT_MINUTES = int(os.getenv("AYYOU_DELAI_ACCEPTATION_RESTAURANT_MINUTES", "5"))

@@ -8,6 +8,8 @@ Règles de sécurité appliquées partout :
    pour éviter que deux requêtes simultanées ne la modifient en même temps.
 """
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -16,8 +18,8 @@ from applications.commandes.models import Commande, LigneCommande, StatutCommand
 from applications.commandes.services import transitionner_statut_commande
 from applications.communs.erreurs import AccesRefuse, ErreurMetier
 
-from .models import DisponibiliteLivreur, EtapeLivraison, Livraison, ProfilLivreur
-from .tarification import calculer_gain_livreur
+from .models import CourseRefusee, DisponibiliteLivreur, EtapeLivraison, Livraison, ProfilLivreur
+from .tarification import calculer_distance_orthodromique_km, calculer_gain_livreur
 
 ETAPES_TERMINEES = [EtapeLivraison.LIVREE, EtapeLivraison.ECHOUEE]
 
@@ -56,20 +58,60 @@ def exiger_livraison_active(profil_livreur: ProfilLivreur) -> Livraison:
     return livraison
 
 
-def lister_courses_disponibles(profil_livreur: ProfilLivreur):
-    """
-    Commandes prêtes au comptoir et encore sans livreur.
-    Un livreur non validé ou hors ligne ne reçoit aucune course.
-    """
-    if not profil_livreur.peut_recevoir_courses:
-        return Commande.objects.none()
+def position_gps_recente(profil_livreur: ProfilLivreur) -> bool:
+    """Le dispatch a besoin d'une position GPS envoyée il y a peu (téléphone du livreur)."""
+    if profil_livreur.latitude is None or profil_livreur.date_derniere_position is None:
+        return False
+    limite = timezone.now() - timedelta(minutes=settings.GPS_POSITION_VALIDE_MINUTES)
+    return profil_livreur.date_derniere_position >= limite
 
-    return (
+
+def rayon_de_recherche_km(commande: Commande) -> float:
+    """
+    Rayon autour du restaurant dans lequel la course est proposée.
+    Il s'élargit tous les DISPATCH_MINUTES_PAR_PAS tant qu'aucun livreur n'a accepté.
+    """
+    debut = commande.heure_fin_preparation or commande.date_modification
+    minutes_attente = max(0, (timezone.now() - debut).total_seconds() / 60)
+    pas = int(minutes_attente // settings.DISPATCH_MINUTES_PAR_PAS)
+    rayon = settings.DISPATCH_RAYON_INITIAL_KM + pas * settings.DISPATCH_RAYON_PAS_KM
+    return min(rayon, settings.DISPATCH_RAYON_MAX_KM)
+
+
+def distance_livreur_restaurant_km(profil_livreur: ProfilLivreur, commande: Commande) -> float | None:
+    etablissement = commande.etablissement
+    if etablissement.latitude is None or etablissement.longitude is None:
+        return None
+    return calculer_distance_orthodromique_km(
+        profil_livreur.latitude, profil_livreur.longitude, etablissement.latitude, etablissement.longitude
+    )
+
+
+def lister_courses_disponibles(profil_livreur: ProfilLivreur) -> list:
+    """
+    Dispatch simple décidé par le serveur :
+    1. seul un livreur validé, en ligne et avec une position GPS récente reçoit des courses ;
+    2. on ne propose que les commandes prêtes, sans livreur, que ce livreur n'a pas refusées ;
+    3. le restaurant doit être dans le rayon de recherche (qui s'élargit avec l'attente) ;
+    4. les courses les plus proches du livreur sont proposées en premier.
+    Un restaurant sans position GPS est proposé à tous (la distance est alors inconnue).
+    """
+    if not profil_livreur.peut_recevoir_courses or not position_gps_recente(profil_livreur):
+        return []
+
+    commandes = (
         Commande.objects.filter(statut=StatutCommande.PRETE_POUR_RETRAIT, livraison__isnull=True)
+        .exclude(refus_livreurs__livreur=profil_livreur)
         .select_related("etablissement")
         .prefetch_related("lignes")
-        .order_by("heure_fin_preparation", "date_creation")
     )
+    proposables = []
+    for commande in commandes:
+        distance = distance_livreur_restaurant_km(profil_livreur, commande)
+        if distance is None or distance <= rayon_de_recherche_km(commande):
+            proposables.append((distance if distance is not None else settings.DISPATCH_RAYON_MAX_KM, commande))
+    proposables.sort(key=lambda element: element[0])
+    return [commande for _, commande in proposables]
 
 
 @transaction.atomic
@@ -91,6 +133,11 @@ def accepter_mission_livraison(commande: Commande, profil_livreur: ProfilLivreur
     commande_verrouillee = Commande.objects.select_for_update().get(pk=commande.pk)
     if commande_verrouillee.statut != StatutCommande.PRETE_POUR_RETRAIT:
         raise ErreurMetier("Cette course n'est plus disponible.", code="course_indisponible")
+    if commande_verrouillee not in lister_courses_disponibles(profil):
+        raise ErreurMetier(
+            "Cette course ne vous est pas proposée (trop loin, GPS inactif ou course refusée).",
+            code="course_non_proposee",
+        )
     if Livraison.objects.filter(commande=commande_verrouillee).exists():
         raise ErreurMetier("Cette course a déjà été acceptée par un autre livreur.", code="course_deja_assignee")
 
@@ -244,6 +291,91 @@ def valider_livraison_avec_pin(profil_livreur: ProfilLivreur, code_pin: str) -> 
             code="livraison_bloquee",
         )
     raise ErreurMetier(f"Code PIN incorrect. Il vous reste {essais_restants} essai(s).", code="code_pin_invalide")
+
+
+def refuser_course(profil_livreur: ProfilLivreur, commande: Commande) -> None:
+    """Le livreur refuse la course : elle ne lui sera plus proposée (les autres la voient toujours)."""
+    CourseRefusee.objects.get_or_create(livreur=profil_livreur, commande=commande)
+
+
+@transaction.atomic
+def annuler_course_par_livreur(profil_livreur: ProfilLivreur, motif: str) -> Commande:
+    """
+    Le livreur annule sa course AVANT d'avoir récupéré la commande.
+    La commande redevient « prête » et est reproposée aux autres livreurs ;
+    le livreur est libéré et ne reverra plus cette course.
+    """
+    if not motif.strip():
+        raise ErreurMetier("Indiquez la raison de l'annulation.", code="motif_obligatoire")
+    livraison = Livraison.objects.select_for_update().filter(livreur=profil_livreur).exclude(etape__in=ETAPES_TERMINEES).first()
+    if livraison is None:
+        raise ErreurMetier("Aucune livraison active.", code="aucune_livraison")
+    commande = Commande.objects.select_for_update().get(pk=livraison.commande_id)
+    if livraison.date_remise_restaurant is not None or commande.statut not in (
+        StatutCommande.COURSE_ASSIGNEE,
+        StatutCommande.EN_VERIFICATION,
+    ):
+        raise ErreurMetier(
+            "Vous avez déjà la commande : déclarez plutôt un problème de livraison.",
+            code="annulation_impossible",
+        )
+
+    CourseRefusee.objects.get_or_create(livreur=profil_livreur, commande=commande)
+    commande.lignes.update(est_verifie_par_livreur=False)
+    # La livraison est supprimée pour pouvoir assigner un nouveau livreur (une seule livraison par commande).
+    # L'historique de la commande garde la trace de l'annulation et de son motif.
+    livraison.delete()
+    transitionner_statut_commande(
+        commande=commande,
+        nouveau_statut=StatutCommande.PRETE_POUR_RETRAIT,
+        auteur=profil_livreur.utilisateur,
+        commentaire=f"Course annulée par le livreur {profil_livreur.utilisateur.nom_complet} : {motif.strip()}",
+    )
+    profil_livreur.disponibilite = DisponibiliteLivreur.EN_LIGNE
+    profil_livreur.save(update_fields=["disponibilite"])
+
+    from applications.notifications.services import creer_notification
+
+    creer_notification(
+        destinataire=commande.etablissement.gerant,
+        titre=f"Livreur désisté pour {commande.reference}",
+        message="Le livreur a annulé la course. Un autre livreur va être recherché.",
+        reference_commande=commande.reference,
+    )
+    return commande
+
+
+@transaction.atomic
+def declarer_echec_livraison(profil_livreur: ProfilLivreur, motif: str) -> Livraison:
+    """
+    Le livreur ne peut pas remettre la commande (client absent, injoignable, adresse fausse...).
+    La commande passe en ECHEC_LIVRAISON : le support décide ensuite (remboursement, nouvelle tentative).
+    """
+    from .models import MotifEchecLivraison
+
+    if motif not in MotifEchecLivraison.values:
+        raise ErreurMetier("Motif d'échec inconnu.", code="motif_invalide")
+    livraison = Livraison.objects.select_for_update().filter(livreur=profil_livreur).exclude(etape__in=ETAPES_TERMINEES).first()
+    if livraison is None:
+        raise ErreurMetier("Aucune livraison active.", code="aucune_livraison")
+    commande = Commande.objects.select_for_update().get(pk=livraison.commande_id)
+    if commande.statut not in (StatutCommande.EN_LIVRAISON, StatutCommande.ARRIVE_CLIENT):
+        raise ErreurMetier("Un échec de livraison se déclare une fois en route vers le client.", code="etape_invalide")
+
+    libelle = MotifEchecLivraison(motif).label
+    transitionner_statut_commande(
+        commande=commande,
+        nouveau_statut=StatutCommande.ECHEC_LIVRAISON,
+        auteur=profil_livreur.utilisateur,
+        motif=libelle,
+        commentaire=f"Échec déclaré par le livreur : {libelle}",
+    )
+    livraison.etape = EtapeLivraison.ECHOUEE
+    livraison.motif_echec = libelle
+    livraison.save(update_fields=["etape", "motif_echec"])
+    profil_livreur.disponibilite = DisponibiliteLivreur.EN_LIGNE
+    profil_livreur.save(update_fields=["disponibilite"])
+    return livraison
 
 
 def changer_disponibilite(profil_livreur: ProfilLivreur, disponibilite: str) -> ProfilLivreur:
