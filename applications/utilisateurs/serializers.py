@@ -4,6 +4,9 @@ import os
 from django.conf import settings
 from rest_framework import serializers
 
+from django.urls import reverse
+
+from applications.communs.fichiers import valider_document, valider_image
 from applications.communs.outils import construire_url_absolue
 
 from .models import DocumentJustificatif, TypeDocument, Utilisateur
@@ -56,17 +59,12 @@ class SerializerUtilisateur(serializers.ModelSerializer):
 class SerializerModificationProfil(serializers.ModelSerializer):
     """Champs qu'un utilisateur peut modifier lui-même (jamais son rôle)."""
 
-    photo = serializers.FileField(required=False, allow_null=True)
+    photo = serializers.FileField(required=False, allow_null=True, validators=[valider_image])
     courriel = serializers.EmailField(required=False)
 
     class Meta:
         model = Utilisateur
         fields = ["prenom", "nom", "telephone", "adresse", "courriel", "photo", "preferences_alimentaires"]
-
-    def validate_photo(self, photo):
-        if photo and photo.size > settings.TAILLE_MAX_PHOTO_OCTETS:
-            raise serializers.ValidationError("La photo dépasse la taille maximale autorisée.")
-        return photo
 
 
 class SerializerDocumentJustificatif(serializers.ModelSerializer):
@@ -97,11 +95,14 @@ class SerializerDocumentJustificatif(serializers.ModelSerializer):
             "date_verification",
         ]
         read_only_fields = ["id", "statut", "motif_rejet", "date_envoi", "date_verification"]
-
-    EXTENSIONS_AUTORISEES = (".pdf", ".jpg", ".jpeg", ".png")
+        # Le chemin brut du fichier n'est jamais renvoyé : le document se lit via l'API protégée.
+        extra_kwargs = {"fichier": {"write_only": True}}
 
     def get_url_fichier(self, obj):
-        return construire_url_absolue(self.context.get("request"), obj.fichier)
+        """URL de l'API protégée (JWT obligatoire), jamais l'URL publique /medias/."""
+        url = reverse("fichier-document", kwargs={"pk": obj.pk})
+        requete = self.context.get("request")
+        return requete.build_absolute_uri(url) if requete else url
 
     def get_nom_fichier(self, obj):
         if obj.fichier and obj.fichier.name:
@@ -129,17 +130,13 @@ class SerializerDocumentJustificatif(serializers.ModelSerializer):
         return ""
 
     def get_est_image(self, obj):
-        return self.get_extension(obj) in ["png", "jpg", "jpeg", "webp", "gif", "svg"]
+        return self.get_extension(obj) in ["png", "jpg", "jpeg"]
 
     def get_est_pdf(self, obj):
         return self.get_extension(obj) == "pdf"
 
     def validate_fichier(self, fichier):
-        if not fichier.name.lower().endswith(self.EXTENSIONS_AUTORISEES):
-            raise serializers.ValidationError("Formats acceptés : PDF, JPG, PNG.")
-        if fichier.size > 10 * 1024 * 1024:
-            raise serializers.ValidationError("Le document ne doit pas dépasser 10 Mo.")
-        return fichier
+        return valider_document(fichier)
 
     def validate_type_document(self, type_document):
         if type_document not in TypeDocument.values:

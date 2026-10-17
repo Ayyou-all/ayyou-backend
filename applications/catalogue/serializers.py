@@ -3,6 +3,7 @@
 from django.conf import settings
 from rest_framework import serializers
 
+from applications.communs.fichiers import valider_image
 from applications.communs.outils import construire_url_absolue
 
 from .models import CategoriePlat, Plat
@@ -42,6 +43,7 @@ class SerializerPlat(serializers.ModelSerializer):
 class SerializerGestionPlat(serializers.ModelSerializer):
     """Création / modification d'un plat par le gérant de l'établissement."""
 
+    image = serializers.ImageField(required=False, allow_null=True, validators=[valider_image])
     adresse_image = serializers.SerializerMethodField()
     categorie_id = serializers.PrimaryKeyRelatedField(
         source="categorie", queryset=CategoriePlat.objects.all(), required=False, allow_null=True

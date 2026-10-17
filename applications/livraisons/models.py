@@ -12,7 +12,7 @@ il décrit l'avancement de la course du point de vue du livreur. Les deux sont m
 from django.conf import settings
 from django.db import models
 
-from applications.communs.choix import StatutValidationPartenaire
+from applications.communs.choix import OperateurMobileMoney, StatutValidationPartenaire
 
 
 class TypeVehicule(models.TextChoices):
@@ -34,6 +34,9 @@ class ProfilLivreur(models.Model):
     nom_vehicule = models.CharField(max_length=80, blank=True, help_text="Ex : Yamaha TMAX")
     immatriculation = models.CharField(max_length=30, blank=True)
     zone_principale = models.CharField(max_length=120, blank=True)
+    # Coordonnées où le livreur reçoit ses gains
+    numero_reversement = models.CharField(max_length=20, blank=True)
+    operateur_reversement = models.CharField(max_length=20, choices=OperateurMobileMoney.choices, blank=True)
     statut_validation = models.CharField(
         max_length=30, choices=StatutValidationPartenaire.choices,
         default=StatutValidationPartenaire.EN_ATTENTE_VALIDATION, db_index=True,
@@ -48,8 +51,14 @@ class ProfilLivreur(models.Model):
         return f"Livreur {self.utilisateur.nom_complet}"
 
     @property
+    def est_valide(self) -> bool:
+        """Compte actif ET profil validé par l'administration (ni suspendu, ni banni)."""
+        return self.utilisateur.is_active and self.statut_validation == StatutValidationPartenaire.ACTIF
+
+    @property
     def peut_recevoir_courses(self) -> bool:
-        return self.statut_validation == StatutValidationPartenaire.ACTIF and self.disponibilite == DisponibiliteLivreur.EN_LIGNE
+        """Règle de dispatch : seul un livreur validé ET en ligne reçoit des propositions."""
+        return self.est_valide and self.disponibilite == DisponibiliteLivreur.EN_LIGNE
 
 
 class EtapeLivraison(models.TextChoices):
@@ -69,6 +78,8 @@ class Livraison(models.Model):
     essais_code_echoues = models.PositiveSmallIntegerField(default=0)
     motif_echec = models.CharField(max_length=255, blank=True)
     date_assignation = models.DateTimeField(auto_now_add=True)
+    # Renseignée quand le restaurant confirme avoir remis la commande au livreur
+    date_remise_restaurant = models.DateTimeField(null=True, blank=True)
     date_recuperation = models.DateTimeField(null=True, blank=True)
     date_livraison = models.DateTimeField(null=True, blank=True)
 
@@ -77,3 +88,30 @@ class Livraison(models.Model):
 
     def __str__(self) -> str:
         return f"Livraison {self.commande.reference} ({self.etape})"
+
+
+class MotifEchecLivraison(models.TextChoices):
+    """Raisons possibles d'un échec de livraison (choisies par le livreur)."""
+
+    CLIENT_ABSENT = "CLIENT_ABSENT", "Client absent"
+    CLIENT_INJOIGNABLE = "CLIENT_INJOIGNABLE", "Client injoignable"
+    ADRESSE_INCORRECTE = "ADRESSE_INCORRECTE", "Adresse incorrecte"
+    PROBLEME_VEHICULE = "PROBLEME_VEHICULE", "Problème de véhicule"
+    PROBLEME_RESTAURANT = "PROBLEME_RESTAURANT", "Problème avec le restaurant"
+
+
+class CourseRefusee(models.Model):
+    """
+    Une course refusée (ou annulée) par un livreur ne lui est plus proposée.
+    Les autres livreurs continuent de la voir.
+    """
+
+    livreur = models.ForeignKey(ProfilLivreur, on_delete=models.CASCADE, related_name="courses_refusees")
+    commande = models.ForeignKey("commandes.Commande", on_delete=models.CASCADE, related_name="refus_livreurs")
+    date_refus = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["livreur", "commande"], name="uniq_refus_livreur_commande")]
+
+    def __str__(self) -> str:
+        return f"{self.livreur} a refusé {self.commande.reference}"

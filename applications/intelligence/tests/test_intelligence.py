@@ -166,5 +166,6 @@ def test_rapport_hebdomadaire_gerant(donnees_intelligence):
     rep = client_api.get("/api/ia/restaurant/rapport-hebdo/")
     assert rep.status_code == 200
     data = rep.json()
-    assert "panier_moyen_fcfa" in data
-    assert "recommandations_actionnables" in data
+    # Sans historique suffisant : aucun chiffre ni conseil inventé
+    assert data["donnees_suffisantes"] is False
+    assert data["message"] == "Données insuffisantes pour produire une prévision fiable."

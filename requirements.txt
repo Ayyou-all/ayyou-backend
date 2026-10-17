@@ -7,6 +7,8 @@ django-cors-headers==4.9.0
 pillow==12.3.0
 python-dotenv==1.2.4
 requests==2.34.2
+# Client HTTP utilisé pour appeler le service IA (applications/intelligence/client_ia.py)
+httpx==0.28.1
 
 # Serveur d'application de production
 gunicorn==23.0.0

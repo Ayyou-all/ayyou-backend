@@ -46,8 +46,6 @@ def serialiser_panier_groupe(panier: dict, requete) -> dict:
                 "delai_livraison": groupe["etablissement"].delai_livraison_texte,
                 "lignes": SerializerLignePanier(groupe["lignes"], many=True, context=contexte).data,
                 "sous_total_fcfa": groupe["sous_total_fcfa"],
-                "frais_livraison_fcfa": groupe["frais_livraison_fcfa"],
-                "total_fcfa": groupe["total_fcfa"],
                 "est_commandable": groupe["est_commandable"],
                 "avertissements": groupe["avertissements"],
             }

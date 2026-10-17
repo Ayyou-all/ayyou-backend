@@ -210,118 +210,118 @@ def repondre_au_message_chatbot(message_texte: str, budget_fcfa: int = None, qua
     }
 
 
+# En dessous de ces seuils, on n'affiche pas de prévision ni d'analyse : elles seraient fausses.
+MINIMUM_COMMANDES_PREVISIONS = 20  # sur les 4 dernières semaines
+MINIMUM_COMMANDES_RAPPORT = 5  # sur les 7 derniers jours
+MESSAGE_DONNEES_INSUFFISANTES = "Données insuffisantes pour produire une prévision fiable."
+SEMAINES_HISTORIQUE = 4
+
+
 def obtenir_previsions_etablissement(utilisateur) -> dict:
-    """Prévisions de coups de feu et d'affluence pour le gérant."""
+    """
+    Affluence attendue aujourd'hui, heure par heure, calculée sur les 4 derniers mêmes jours
+    de la semaine (ex. : les 4 derniers vendredis). Pas de profil inventé.
+    """
+    from applications.commandes.statistiques import STATUTS_NON_COMPTES
+
     etablissement = obtenir_etablissement_du_gerant(utilisateur)
-    jour_actuel = datetime.now().weekday()
-
-    # Agrégation des commandes réelles pour calculer l'historique des ventes par créneau
-    commandes_passees = Commande.objects.filter(
+    jour_cible = timezone.localtime().weekday()
+    commandes = Commande.objects.filter(
         etablissement=etablissement,
-    ).exclude(statut__in=[StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.REFUSEE_ANNULEE])
+        date_creation__gte=timezone.now() - timezone.timedelta(weeks=SEMAINES_HISTORIQUE),
+    ).exclude(statut__in=STATUTS_NON_COMPTES)
 
-    ventes_agreg = {}
-    for c in commandes_passees:
-        dt = timezone.localtime(c.date_creation)
-        cle = (dt.weekday(), dt.hour)
-        if cle not in ventes_agreg:
-            ventes_agreg[cle] = {"quantite_commandes": 0, "chiffre_affaires_fcfa": 0}
-        ventes_agreg[cle]["quantite_commandes"] += 1
-        ventes_agreg[cle]["chiffre_affaires_fcfa"] += (c.total_fcfa or 0)
-
-    historique_ventes = [
-        {
-            "jour_semaine": js,
-            "heure": h,
-            "quantite_commandes": d["quantite_commandes"],
-            "chiffre_affaires_fcfa": d["chiffre_affaires_fcfa"],
+    if commandes.count() < MINIMUM_COMMANDES_PREVISIONS:
+        return {
+            "restaurant_id": etablissement.id,
+            "nom_restaurant": etablissement.nom,
+            "donnees_suffisantes": False,
+            "message": MESSAGE_DONNEES_INSUFFISANTES,
+            "previsions_par_heure": [],
+            "conseils_organisation": [],
         }
-        for (js, h), d in ventes_agreg.items()
-    ]
+
+    ventes = {}
+    for commande in commandes:
+        moment = timezone.localtime(commande.date_creation)
+        cle = (moment.weekday(), moment.hour)
+        ventes.setdefault(cle, {"quantite_commandes": 0, "chiffre_affaires_fcfa": 0})
+        ventes[cle]["quantite_commandes"] += 1
+        ventes[cle]["chiffre_affaires_fcfa"] += commande.sous_total_fcfa
 
     payload = {
         "restaurant_id": etablissement.id,
         "nom_restaurant": etablissement.nom,
-        "historique_ventes": historique_ventes,
-        "jour_cible": jour_actuel,
+        "historique_ventes": [{"jour_semaine": j, "heure": h, **valeurs} for (j, h), valeurs in ventes.items()],
+        "jour_cible": jour_cible,
+        "nombre_semaines": SEMAINES_HISTORIQUE,
     }
-
     reponse_ia = appel_service_ia("ia/previsions/", payload)
     if reponse_ia:
-        return reponse_ia
+        return {**reponse_ia, "donnees_suffisantes": True}
 
-    # REPLI LOCAL
+    # Service IA indisponible : même calcul, fait ici (moyenne des mêmes jours).
+    previsions = [
+        {"heure": heure, "commandes_estimees": round(valeurs["quantite_commandes"] / SEMAINES_HISTORIQUE, 1)}
+        for (jour, heure), valeurs in sorted(ventes.items())
+        if jour == jour_cible
+    ]
+    pic = max(previsions, key=lambda p: p["commandes_estimees"], default=None)
     return {
         "restaurant_id": etablissement.id,
         "nom_restaurant": etablissement.nom,
-        "previsions_par_heure": [
-            {"heure": 12, "commandes_estimees": 15, "intensite": "COUP_DE_FEU"},
-            {"heure": 13, "commandes_estimees": 22, "intensite": "COUP_DE_FEU"},
-            {"heure": 20, "commandes_estimees": 18, "intensite": "COUP_DE_FEU"},
-        ],
-        "heure_de_pointe": "12h30 - 13h30 (~22 commandes)",
-        "conseils_organisation": [
-            "Préparez vos emballages et barquettes avant 11h30 pour accélérer les départs livreurs.",
-            "Optimisez le stock d'oignons et de sauces pour le service du midi.",
-        ],
-        "source": "REPLI_LOCAL",
+        "donnees_suffisantes": True,
+        "previsions_par_heure": previsions,
+        "heure_de_pointe": f"{pic['heure']}h-{pic['heure'] + 1}h" if pic else "",
+        "conseils_organisation": [],
+        "source": "CALCUL_LOCAL",
     }
 
 
 def generer_rapport_hebdo_etablissement(utilisateur) -> dict:
-    """Rapport managérial hebdomadaire pour le gérant."""
+    """Rapport de la semaine écoulée, construit uniquement sur les vraies commandes."""
+    from applications.commandes.statistiques import meilleures_ventes, resume_periode
+
     etablissement = obtenir_etablissement_du_gerant(utilisateur)
-    sept_jours_avant = timezone.now() - timezone.timedelta(days=7)
+    fin = timezone.now()
+    debut = fin - timezone.timedelta(days=7)
+    resume = resume_periode(etablissement, debut, fin)
 
-    commandes_semaine = Commande.objects.filter(
-        etablissement=etablissement,
-        date_creation__gte=sept_jours_avant,
-    ).exclude(statut__in=[StatutCommande.EN_ATTENTE_PAIEMENT, StatutCommande.REFUSEE_ANNULEE])
+    if resume["commandes"] < MINIMUM_COMMANDES_RAPPORT:
+        return {
+            "restaurant_id": etablissement.id,
+            "donnees_suffisantes": False,
+            "message": MESSAGE_DONNEES_INSUFFISANTES,
+            "statistiques": resume,
+        }
 
-    total_cmd = commandes_semaine.count()
-    ca = commandes_semaine.aggregate(total=Sum("total_fcfa"))["total"] or 0
-
-    # Plats vendus
-    lignes = (
-        LigneCommande.objects.filter(commande__in=commandes_semaine)
-        .values("nom_plat")
-        .annotate(total_qte=Sum("quantite"), total_ca=Sum(F("prix_unitaire_fcfa") * F("quantite")))
-        .order_by("-total_qte")[:5]
-    )
-
-    plats_vendus = [
-        {"nom": item["nom_plat"], "quantite": item["total_qte"], "chiffre_affaires_fcfa": item["total_ca"]}
-        for item in lignes
-    ]
-
+    plats_vendus = meilleures_ventes(etablissement, debut, fin)
     payload = {
         "restaurant_id": etablissement.id,
         "nom_restaurant": etablissement.nom,
-        "total_commandes": total_cmd,
-        "chiffre_affaires_fcfa": ca,
+        "total_commandes": resume["commandes"],
+        "chiffre_affaires_fcfa": resume["chiffre_affaires_fcfa"],
         "plats_vendus": plats_vendus,
-        "taux_acceptation_pourcent": 96.0,
-        "temps_moyen_preparation_minutes": 24,
+        "taux_acceptation_pourcent": resume["taux_acceptation_pourcent"],
+        "temps_moyen_preparation_minutes": resume["temps_moyen_preparation_minutes"],
     }
-
     reponse_ia = appel_service_ia("ia/rapport/", payload)
     if reponse_ia:
-        return reponse_ia
+        return {**reponse_ia, "donnees_suffisantes": True, "statistiques": resume}
 
-    # REPLI LOCAL
-    panier_moyen = int(ca / total_cmd) if total_cmd > 0 else 0
-    plat_star = plats_vendus[0]["nom"] if plats_vendus else "Thiéboudienne royale"
-
+    # Service IA indisponible : on présente seulement les chiffres réels, sans commentaire inventé.
     return {
         "restaurant_id": etablissement.id,
-        "titre_rapport": f"Bilan de performance hebdomadaire — {etablissement.nom}",
-        "resume_executif": f"{etablissement.nom} a enregistré {total_cmd} commandes cette semaine pour {ca:,} FCFA.",
-        "plat_star": plat_star,
-        "panier_moyen_fcfa": panier_moyen,
-        "points_forts": ["Très bonne cadence de préparation", "Fidélisation régulière de la clientèle"],
-        "recommandations_actionnables": [
-            "Créez une vidéo Reels de 30s sur votre plat vedette pour stimuler les commandes du midi.",
-            "Ajoutez des boissons locales en formule pour faire progresser votre panier moyen.",
-        ],
-        "source": "REPLI_LOCAL",
+        "donnees_suffisantes": True,
+        "titre_rapport": f"Bilan des 7 derniers jours — {etablissement.nom}",
+        "resume_executif": (
+            f"{resume['commandes']} commandes pour {resume['chiffre_affaires_fcfa']:,} FCFA "
+            f"(panier moyen {resume['panier_moyen_fcfa']:,} FCFA)."
+        ).replace(",", " "),
+        "plat_star": plats_vendus[0]["nom"] if plats_vendus else "",
+        "panier_moyen_fcfa": resume["panier_moyen_fcfa"],
+        "points_forts": [],
+        "recommandations_actionnables": [],
+        "statistiques": resume,
+        "source": "CALCUL_LOCAL",
     }

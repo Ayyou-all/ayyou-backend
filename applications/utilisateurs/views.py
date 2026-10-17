@@ -5,13 +5,16 @@ Vues du profil utilisateur.
 |-----------|--------------------------------------|------------------------------|
 | GET/PATCH | /api/utilisateurs/moi/               | Connecté                     |
 | GET/POST  | /api/utilisateurs/moi/documents/     | Restaurant, Livreur         |
+| GET       | /api/utilisateurs/documents/{id}/fichier/ | Propriétaire ou Admin  |
 """
 
+from django.http import FileResponse, Http404
 from rest_framework import generics
+from rest_framework.views import APIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import DocumentJustificatif
+from .models import DocumentJustificatif, Role
 from .permissions import EstPartenaire
 from .serializers import SerializerDocumentJustificatif, SerializerModificationProfil, SerializerUtilisateur
 
@@ -77,3 +80,20 @@ class VueChangerMotDePasse(generics.GenericAPIView):
 
         return Response({"message": "Votre mot de passe a été modifié avec succès."})
 
+
+
+class VueFichierDocument(APIView):
+    """
+    Télécharge une pièce justificative.
+    Seuls le propriétaire du document et un administrateur y ont accès ;
+    pour tout autre compte, on répond 404 (on ne révèle pas que le document existe).
+    """
+
+    def get(self, request, pk):
+        document = DocumentJustificatif.objects.filter(pk=pk).first()
+        est_admin = request.user.role == Role.ADMINISTRATEUR or request.user.is_superuser
+        if document is None or not (est_admin or document.proprietaire_id == request.user.id):
+            raise Http404("Document introuvable.")
+        if not document.fichier:
+            raise Http404("Fichier absent.")
+        return FileResponse(document.fichier.open("rb"), as_attachment=False, filename=document.fichier.name.split("/")[-1])
