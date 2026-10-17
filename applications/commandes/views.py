@@ -233,6 +233,31 @@ class VueMarquerPreteCommande(APIView):
         return Response(SerializerCommandeRestaurant(commande_maj).data)
 
 
+class VueVersionCommandesRestaurant(APIView):
+    """
+    GET /api/commandes/restaurant/version/
+    Réponse minuscule interrogée toutes les quelques secondes par la tablette du restaurant :
+    la « version » change dès qu'une commande est créée ou modifiée, ou qu'une notification arrive.
+    L'écran ne recharge la liste complète que lorsque la version change (économise le réseau).
+    """
+
+    permission_classes = [EstGerantEtablissement]
+
+    def get(self, request):
+        from django.db.models import Count, Max
+
+        from applications.etablissements.services import obtenir_etablissement_du_gerant
+        from applications.notifications.models import Notification
+
+        etablissement = obtenir_etablissement_du_gerant(request.user)
+        commandes = Commande.objects.filter(etablissement=etablissement).aggregate(
+            derniere=Max("date_modification"), nombre=Count("id")
+        )
+        derniere_notification = Notification.objects.filter(destinataire=request.user).aggregate(id=Max("id"))["id"]
+        version = f"{commandes['derniere'].isoformat() if commandes['derniere'] else ''}|{commandes['nombre']}|{derniere_notification or 0}"
+        return Response({"version": version})
+
+
 class VueStatistiquesRestaurant(APIView):
     """
     GET /api/commandes/restaurant/statistiques/?periode=24h|7j|30j

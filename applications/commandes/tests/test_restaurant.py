@@ -89,3 +89,16 @@ def test_tableau_du_jour_ne_renvoie_pas_les_vieilles_commandes_terminees(cuisine
     references = [c["reference"] for c in api(cuisine["gerant"]).get("/api/commandes/restaurant/?vue=jour").data]
     assert cuisine["commande"].reference in references
     assert vieille.reference not in references
+
+
+@pytest.mark.django_db
+def test_version_change_quand_une_commande_change(cuisine):
+    """Phase 9 : la tablette ne recharge la liste que si la « version » change."""
+    client = api(cuisine["gerant"])
+    avant = client.get("/api/commandes/restaurant/version/").data["version"]
+    assert client.get("/api/commandes/restaurant/version/").data["version"] == avant  # rien n'a bougé
+
+    commande = cuisine["commande"]
+    commande.statut = StatutCommande.COURSE_ASSIGNEE
+    commande.save()
+    assert client.get("/api/commandes/restaurant/version/").data["version"] != avant
