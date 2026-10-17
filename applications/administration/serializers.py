@@ -165,30 +165,66 @@ class SerializerCommandeAdministration(serializers.Serializer):
     adresseLivraison = serializers.CharField(source="adresse_livraison", read_only=True)
     articles = serializers.SerializerMethodField()
     methodePaiement = serializers.CharField(source="mode_paiement", read_only=True)
+    # Informations utiles au support
+    statutDetaille = serializers.CharField(source="statut", read_only=True)
+    libelleStatutDetaille = serializers.CharField(source="get_statut_display", read_only=True)
+    motif = serializers.CharField(source="motif_refus_ou_annulation", read_only=True)
+    repereLivraison = serializers.CharField(source="repere_livraison", read_only=True)
+    sousTotalFcfa = serializers.IntegerField(source="sous_total_fcfa", read_only=True)
+    fraisLivraisonFcfa = serializers.IntegerField(source="frais_livraison_fcfa", read_only=True)
+    paiementConfirme = serializers.SerializerMethodField()
+    paiementARembourser = serializers.SerializerMethodField()
+    remiseConfirmee = serializers.SerializerMethodField()
+    historique = serializers.SerializerMethodField()
+
+    def get_paiementConfirme(self, obj):
+        return any(t.statut in ("CONFIRME", "REMBOURSE") for t in obj.tentatives_paiement.all())
+
+    def get_paiementARembourser(self, obj):
+        from .services import paiement_a_rembourser
+
+        return paiement_a_rembourser(obj)
+
+    def get_remiseConfirmee(self, obj):
+        livraison = getattr(obj, "livraison", None)
+        return bool(livraison and livraison.date_remise_restaurant)
+
+    def get_historique(self, obj):
+        """Journal des changements (qui, quand, quoi) pour comprendre une commande problématique."""
+        return [
+            {
+                "date": h.date_transition.isoformat(),
+                "ancienStatut": h.ancien_statut,
+                "nouveauStatut": h.nouveau_statut,
+                "auteur": h.auteur.nom_complet if h.auteur else "Système",
+                "commentaire": h.commentaire,
+            }
+            for h in obj.historique_statuts.all()
+        ]
 
     def get_identifiantCommande(self, obj):
         return f"#{obj.reference}"
 
     def get_clientNom(self, obj):
-        return obj.client.nom_complet if obj.client else "Client AYYOU"
+        return obj.client.nom_complet if obj.client else ""
 
     def get_clientPhoto(self, obj):
         if obj.client and obj.client.photo:
-            return obj.client.photo.url
-        return "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
+            return construire_url_absolue(self.context.get("request"), obj.client.photo)
+        return None
 
     def get_clientTelephone(self, obj):
-        return obj.client.telephone if obj.client else "+221 --"
+        return obj.telephone_contact or (obj.client.telephone if obj.client else "")
 
     def get_coursierNom(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur:
             return obj.livraison.livreur.utilisateur.nom_complet
-        return "Non assigné"
+        return None
 
     def get_coursierPhoto(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur and obj.livraison.livreur.utilisateur.photo:
-            return obj.livraison.livreur.utilisateur.photo.url
-        return "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
+            return construire_url_absolue(self.context.get("request"), obj.livraison.livreur.utilisateur.photo)
+        return None
 
     def get_coursierTelephone(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur:
@@ -280,7 +316,7 @@ class SerializerUtilisateurAdministration(serializers.Serializer):
         badges = {
             "CLIENT": "CLIENT STANDARD",
             "RESTAURANT": "PARTENAIRE PRO",
-            "LIVREUR": "LIVREUR CERTIFIÉ",
+            "LIVREUR": "LIVREUR",
             "ADMINISTRATEUR": "ADMIN SYSTÈME",
         }
         return badges.get(obj.role, "UTILISATEUR")
@@ -306,14 +342,14 @@ class SerializerUtilisateurAdministration(serializers.Serializer):
     def get_dateInscription(self, obj):
         if obj.date_creation:
             return obj.date_creation.strftime("%d %b. %Y")
-        return "Récemment"
+        return ""
 
     def get_statut(self, obj):
         return "ACTIF" if obj.is_active else "INACTIF"
 
     def get_photoUrl(self, obj):
         if obj.photo:
-            return obj.photo.url
+            return construire_url_absolue(self.context.get("request"), obj.photo)
         return None
 
     def get_nombreCommandes(self, obj):
