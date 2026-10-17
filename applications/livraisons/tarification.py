@@ -122,6 +122,18 @@ def calculer_frais_livraison_progressifs(
     return max(500, frais_entier)
 
 
+def calculer_gain_livreur(frais_livraison_fcfa: int) -> int:
+    """
+    Gain du livreur = pourcentage configurable des frais de livraison payés par le client.
+    Le gain ne dépasse jamais les frais encaissés : la plateforme ne perd pas d'argent sur une course.
+    """
+    from django.conf import settings
+
+    pourcentage = settings.PART_LIVREUR_FRAIS_LIVRAISON_POURCENT
+    gain = int(frais_livraison_fcfa * pourcentage / 100)
+    return min(gain, frais_livraison_fcfa)
+
+
 def calculer_frais_livraison_commande(etablissement, lat_client, lng_client) -> int:
     """
     Calcule le montant des frais de livraison pour une commande.

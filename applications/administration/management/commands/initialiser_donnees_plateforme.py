@@ -11,7 +11,8 @@ Peuple la base de données avec :
 """
 
 from decimal import Decimal
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.text import slugify
@@ -31,6 +32,13 @@ class Command(BaseCommand):
     help = "Initialise la base de données AYYOU avec des données réelles dakaroises."
 
     def handle(self, *args, **options):
+        # Sécurité : ces comptes de démonstration ont un mot de passe connu.
+        # Ils ne doivent JAMAIS être créés sur un serveur de production.
+        if not settings.DEBUG:
+            raise CommandError(
+                "Commande réservée au développement (AYYOU_DEBUG=true). "
+                "En production, créez l'administrateur avec : python manage.py createsuperuser"
+            )
         self.stdout.write(self.style.NOTICE("Démarrage de l'initialisation des données AYYOU..."))
 
         # 1. Catégories officielles

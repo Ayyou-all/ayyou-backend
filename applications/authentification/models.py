@@ -33,6 +33,8 @@ class CodeVerificationEmail(models.Model):
     date_expiration = models.DateTimeField("date d'expiration")
     est_utilise = models.BooleanField("code utilisé", default=False)
     tentatives_echouees = models.PositiveIntegerField("tentatives échouées", default=0)
+    # Renseignée seulement quand l'utilisateur a saisi le BON code (et non quand un code est remplacé).
+    date_verification = models.DateTimeField("date de vérification réussie", null=True, blank=True)
 
     class Meta:
         verbose_name = "code de vérification e-mail"
@@ -59,8 +61,10 @@ class CodeVerificationEmail(models.Model):
         )
 
     def marquer_utilise(self) -> None:
+        """Appelée quand le bon code est saisi : le code est consommé et l'adresse est prouvée."""
         self.est_utilise = True
-        self.save(update_fields=["est_utilise"])
+        self.date_verification = timezone.now()
+        self.save(update_fields=["est_utilise", "date_verification"])
 
     def enregistrer_echec(self) -> None:
         self.tentatives_echouees += 1

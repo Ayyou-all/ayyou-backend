@@ -3,6 +3,7 @@ Vues HTTP pour le domaine Publications (Fil immersif d'accueil et Ayyou Studio).
 """
 
 from django.db.models import F
+from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -66,30 +67,55 @@ class VueToggleLikePublication(APIView):
         return Response(
             {
                 "estAime": aime,
-                "nombreJeaime": str(total_likes),
+                "nombreJeaime": total_likes,
                 "message": "Mention J'aime ajoutée." if aime else "Mention J'aime retirée.",
             }
         )
 
 
+def identifiant_spectateur(request) -> str:
+    """Utilisateur connecté, sinon adresse IP : sert à ne compter qu'une fois la même personne."""
+    if request.user.is_authenticated:
+        return f"u{request.user.pk}"
+    return f"ip{request.META.get('REMOTE_ADDR', '')}"
+
+
+def compter_une_fois(request, publication_id: int, action: str, duree_secondes: int) -> bool:
+    """Vrai si cette personne n'a pas déjà fait cette action sur cette publication récemment."""
+    cle = f"ayyou:{action}:{publication_id}:{identifiant_spectateur(request)}"
+    return cache.add(cle, True, timeout=duree_secondes)
+
+
 class VueIncrementerVue(APIView):
-    """Enregistre une vue sur une publication (utilisé par le composant Reel)."""
+    """
+    POST /api/publications/<id>/vue/
+    Enregistre une vue (une seule par personne et par publication toutes les 6 heures)
+    et renvoie le compteur réel enregistré en base.
+    """
 
     permission_classes = [AllowAny]
 
     def post(self, request, pk):
-        Publication.objects.filter(pk=pk).update(nombre_vues=F("nombre_vues") + 1)
-        return Response({"succes": True})
+        publication = get_object_or_404(Publication, pk=pk, est_publie=True)
+        comptee = compter_une_fois(request, pk, "vue", 6 * 3600)
+        if comptee:
+            Publication.objects.filter(pk=pk).update(nombre_vues=F("nombre_vues") + 1)
+            publication.refresh_from_db(fields=["nombre_vues"])
+        return Response({"comptee": comptee, "nombreVues": publication.nombre_vues})
 
 
 class VueIncrementerPartage(APIView):
-    """Enregistre un partage d'une vidéo."""
+    """POST /api/publications/<id>/partage/ : un partage par personne et par publication et par heure."""
 
     permission_classes = [AllowAny]
 
     def post(self, request, pk):
-        Publication.objects.filter(pk=pk).update(nombre_partages=F("nombre_partages") + 1)
-        return Response({"succes": True})
+        publication = get_object_or_404(Publication, pk=pk, est_publie=True)
+        comptee = compter_une_fois(request, pk, "partage", 3600)
+        if comptee:
+            Publication.objects.filter(pk=pk).update(nombre_partages=F("nombre_partages") + 1)
+            publication.refresh_from_db(fields=["nombre_partages"])
+        return Response({"comptee": comptee, "nombrePartages": publication.nombre_partages})
 
 
 class VueStudioPublications(APIView):

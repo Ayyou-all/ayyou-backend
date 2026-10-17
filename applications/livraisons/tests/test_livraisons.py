@@ -10,6 +10,7 @@ Scénarios testés :
 """
 
 import pytest
+from django.utils import timezone
 
 from applications.commandes.models import Commande, LigneCommande, StatutCommande
 from applications.communs.choix import StatutValidationPartenaire
@@ -24,6 +25,14 @@ from applications.livraisons.services import (
     valider_livraison_avec_pin,
 )
 from applications.utilisateurs.models import Role, Utilisateur
+
+
+def remise_par_le_restaurant(livraison):
+    """Simule la confirmation du restaurant : « commande remise au livreur »."""
+    from django.utils import timezone
+
+    livraison.date_remise_restaurant = timezone.now()
+    livraison.save(update_fields=["date_remise_restaurant"])
 
 
 @pytest.fixture
@@ -58,6 +67,7 @@ def environnement_livraison(db):
         nom_vehicule="Kymco Agility 125",
         statut_validation=StatutValidationPartenaire.ACTIF,
         disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
     )
     etablissement = Etablissement.objects.create(
         gerant=gerant,
@@ -104,18 +114,20 @@ class TestLivraisons:
         profil = environnement_livraison["profil_livreur"]
         courses = lister_courses_disponibles(profil)
 
-        assert courses.count() == 1
-        assert courses.first().id == environnement_livraison["commande"].id
+        assert len(courses) == 1
+        assert courses[0].id == environnement_livraison["commande"].id
 
     def test_acceptation_mission_coursier(self, environnement_livraison):
         profil = environnement_livraison["profil_livreur"]
         commande = environnement_livraison["commande"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
 
         assert livraison.livreur == profil
         assert livraison.etape == EtapeLivraison.VERS_RESTAURANT
-        assert livraison.gain_livreur_fcfa >= 1000
+        # Gain = part configurable des frais (80 % de 1500 F par défaut), jamais plus que les frais
+        assert livraison.gain_livreur_fcfa == 1200
 
         commande.refresh_from_db()
         assert commande.statut == StatutCommande.COURSE_ASSIGNEE
@@ -131,7 +143,7 @@ class TestLivraisons:
         commande.save(update_fields=["statut"])
 
         courses = lister_courses_disponibles(profil)
-        assert courses.filter(id=commande.id).exists() is False
+        assert commande not in courses
 
     def test_double_acceptation_concurrente_rejetee(self, environnement_livraison):
         profil1 = environnement_livraison["profil_livreur"]
@@ -150,6 +162,7 @@ class TestLivraisons:
             type_vehicule=TypeVehicule.SCOOTER,
             statut_validation=StatutValidationPartenaire.ACTIF,
             disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
         )
 
         accepter_mission_livraison(commande, profil1)
@@ -165,6 +178,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
 
         # Pointer seulement 1 article sur 2
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
@@ -192,6 +206,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)
@@ -201,7 +216,7 @@ class TestLivraisons:
         commande.save()
 
         # Validation avec code PIN exact
-        valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        valider_livraison_avec_pin(profil, commande.code_livraison_pin)
 
         commande.refresh_from_db()
         assert commande.statut == StatutCommande.LIVREE
@@ -234,6 +249,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)
@@ -243,18 +259,20 @@ class TestLivraisons:
         # 4 tentatives avec un mauvais code PIN
         for _ in range(4):
             with pytest.raises(ErreurMetier) as exc:
-                valider_livraison_avec_pin(livraison, "9999")
+                valider_livraison_avec_pin(profil, "9999")
             assert exc.value.code == "code_pin_invalide"
 
-        # 5ème tentative échouée -> verrouillage immédiat
+        # 5ème tentative échouée -> verrouillage immédiat (compteur enregistré en base)
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, "9999")
-        assert exc.value.code == "tentatives_depassees"
+            valider_livraison_avec_pin(profil, "9999")
+        assert exc.value.code == "livraison_bloquee"
+        livraison.refresh_from_db()
+        assert livraison.essais_code_echoues == 5
 
         # 6ème tentative même avec le bon code PIN -> toujours bloquée
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
-        assert exc.value.code == "tentatives_depassees"
+            valider_livraison_avec_pin(profil, commande.code_livraison_pin)
+        assert exc.value.code == "livraison_bloquee"
 
     def test_rejet_revalidation_commande_deja_livree(self, environnement_livraison):
         profil = environnement_livraison["profil_livreur"]
@@ -263,6 +281,7 @@ class TestLivraisons:
         art2 = environnement_livraison["art2"]
 
         livraison = accepter_mission_livraison(commande, profil)
+        remise_par_le_restaurant(livraison)
         pointer_article_au_guichet(livraison, art1.id, est_verifie=True)
         pointer_article_au_guichet(livraison, art2.id, est_verifie=True)
         demarrer_trajet_vers_client(livraison)
@@ -270,9 +289,9 @@ class TestLivraisons:
         commande.save()
 
         # Première validation réussie
-        valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
+        valider_livraison_avec_pin(profil, commande.code_livraison_pin)
 
-        # Seconde validation doit être immédiatement rejetée
+        # Seconde validation : la livraison est terminée, il n'y a plus de livraison active
         with pytest.raises(ErreurMetier) as exc:
-            valider_livraison_avec_pin(livraison, commande.code_livraison_pin)
-        assert exc.value.code == "commande_deja_livree"
+            valider_livraison_avec_pin(profil, commande.code_livraison_pin)
+        assert exc.value.code == "aucune_livraison"

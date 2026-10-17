@@ -43,14 +43,17 @@ def calculer_panier_groupe(client) -> dict:
     Calcule le panier regroupé par établissement, avec des montants recalculés
     à partir des prix ACTUELS des plats (jamais à partir d'un montant envoyé par le frontend).
 
+    Les frais de livraison ne sont pas calculés ici : ils dépendent de l'adresse de livraison,
+    connue au moment de commander (voir POST /api/commandes/estimation/).
+
     Renvoie :
     {
       "paniers_par_etablissement": [
         {"etablissement": <Etablissement>, "lignes": [...], "sous_total_fcfa": 7500,
-         "frais_livraison_fcfa": 1000, "total_fcfa": 8500, "est_commandable": True, "avertissements": []}
+         "est_commandable": True, "avertissements": []}
       ],
       "nombre_total_articles": 3,
-      "total_global_fcfa": 8500,
+      "total_global_fcfa": 7500,
     }
     """
     groupes: dict[int, dict] = {}
@@ -70,16 +73,13 @@ def calculer_panier_groupe(client) -> dict:
 
     paniers = []
     for groupe in groupes.values():
-        frais = groupe["etablissement"].frais_livraison_fcfa if groupe["sous_total_fcfa"] > 0 else 0
-        groupe["frais_livraison_fcfa"] = frais
-        groupe["total_fcfa"] = groupe["sous_total_fcfa"] + frais
         groupe["est_commandable"] = groupe["est_commandable"] and groupe["sous_total_fcfa"] > 0
         paniers.append(groupe)
 
     return {
         "paniers_par_etablissement": paniers,
         "nombre_total_articles": sum(ligne.quantite for groupe in paniers for ligne in groupe["lignes"]),
-        "total_global_fcfa": sum(groupe["total_fcfa"] for groupe in paniers),
+        "total_global_fcfa": sum(groupe["sous_total_fcfa"] for groupe in paniers),
     }
 
 

@@ -26,7 +26,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
     emailGerant = serializers.CharField(source="gerant.courriel", read_only=True)
     telephoneGerant = serializers.CharField(source="gerant.telephone", read_only=True)
     totalCommandes = serializers.SerializerMethodField()
-    noteMoyenne = serializers.SerializerMethodField()
     adresse_logo = serializers.SerializerMethodField()
     adresse_couverture = serializers.SerializerMethodField()
 
@@ -51,7 +50,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
             "emailGerant",
             "telephoneGerant",
             "totalCommandes",
-            "noteMoyenne",
             "documents",
             "platsMenu",
             "adresse_logo",
@@ -68,7 +66,7 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
         return [
             {
                 "nom": p.nom,
-                "description": p.description or "Plat signature préparé avec des produits frais.",
+                "description": p.description,
                 "prix": p.prix_fcfa,
             }
             for p in obj.plats.filter(est_archive=False)[:10]
@@ -83,9 +81,6 @@ class SerializerEtablissementModeration(serializers.ModelSerializer):
     def get_totalCommandes(self, obj):
         return obj.commandes_etablissement.count()
 
-    def get_noteMoyenne(self, obj):
-        return 4.8
-
 
 class SerializerLivreurModeration(serializers.ModelSerializer):
     """Présentation d'un coursier pour modération et gestion globale superadmin."""
@@ -96,7 +91,7 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
     telephone = serializers.CharField(source="utilisateur.telephone", read_only=True)
     dateInscription = serializers.DateTimeField(source="utilisateur.date_creation", read_only=True)
     totalLivraisons = serializers.SerializerMethodField()
-    noteMoyenne = serializers.SerializerMethodField()
+    livraisonsAujourdhui = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
 
     class Meta:
@@ -115,7 +110,7 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
             "email",
             "telephone",
             "totalLivraisons",
-            "noteMoyenne",
+            "livraisonsAujourdhui",
             "photo",
             "documents",
         ]
@@ -132,12 +127,13 @@ class SerializerLivreurModeration(serializers.ModelSerializer):
         return SerializerDocumentJustificatif(docs, many=True, context=self.context).data
 
     def get_totalLivraisons(self, obj):
-        if hasattr(obj, "livraisons"):
-            return obj.livraisons.count()
-        return 0
+        """Nombre de livraisons réellement terminées (PIN validé)."""
+        return obj.livraisons.filter(etape="LIVREE").count()
 
-    def get_noteMoyenne(self, obj):
-        return 4.9
+    def get_livraisonsAujourdhui(self, obj):
+        from django.utils import timezone
+
+        return obj.livraisons.filter(etape="LIVREE", date_livraison__date=timezone.localdate()).count()
 
 
 class SerializerArticleCommandeAdmin(serializers.Serializer):
@@ -169,30 +165,73 @@ class SerializerCommandeAdministration(serializers.Serializer):
     adresseLivraison = serializers.CharField(source="adresse_livraison", read_only=True)
     articles = serializers.SerializerMethodField()
     methodePaiement = serializers.CharField(source="mode_paiement", read_only=True)
+    # Informations utiles au support
+    statutDetaille = serializers.CharField(source="statut", read_only=True)
+    libelleStatutDetaille = serializers.CharField(source="get_statut_display", read_only=True)
+    motif = serializers.CharField(source="motif_refus_ou_annulation", read_only=True)
+    repereLivraison = serializers.CharField(source="repere_livraison", read_only=True)
+    sousTotalFcfa = serializers.IntegerField(source="sous_total_fcfa", read_only=True)
+    fraisLivraisonFcfa = serializers.IntegerField(source="frais_livraison_fcfa", read_only=True)
+    paiementConfirme = serializers.SerializerMethodField()
+    paiementARembourser = serializers.SerializerMethodField()
+    remiseConfirmee = serializers.SerializerMethodField()
+    historique = serializers.SerializerMethodField()
+    livraisonBloquee = serializers.SerializerMethodField()
+
+    def get_livraisonBloquee(self, obj):
+        from applications.livraisons.services import livraison_est_bloquee
+
+        livraison = getattr(obj, "livraison", None)
+        return bool(livraison and livraison_est_bloquee(livraison))
+
+    def get_paiementConfirme(self, obj):
+        return any(t.statut in ("CONFIRME", "REMBOURSE") for t in obj.tentatives_paiement.all())
+
+    def get_paiementARembourser(self, obj):
+        from .services import paiement_a_rembourser
+
+        return paiement_a_rembourser(obj)
+
+    def get_remiseConfirmee(self, obj):
+        livraison = getattr(obj, "livraison", None)
+        return bool(livraison and livraison.date_remise_restaurant)
+
+    def get_historique(self, obj):
+        """Journal des changements (qui, quand, quoi) pour comprendre une commande problématique."""
+        return [
+            {
+                "date": h.date_transition.isoformat(),
+                "ancienStatut": h.ancien_statut,
+                "nouveauStatut": h.nouveau_statut,
+                "auteur": h.auteur.nom_complet if h.auteur else "Système",
+                "commentaire": h.commentaire,
+            }
+            for h in obj.historique_statuts.all()
+        ]
 
     def get_identifiantCommande(self, obj):
         return f"#{obj.reference}"
 
     def get_clientNom(self, obj):
-        return obj.client.nom_complet if obj.client else "Client AYYOU"
+        return obj.client.nom_complet if obj.client else ""
 
     def get_clientPhoto(self, obj):
         if obj.client and obj.client.photo:
-            return obj.client.photo.url
-        return "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
+            return construire_url_absolue(self.context.get("request"), obj.client.photo)
+        return None
 
     def get_clientTelephone(self, obj):
-        return obj.client.telephone if obj.client else "+221 --"
+        return obj.telephone_contact or (obj.client.telephone if obj.client else "")
 
     def get_coursierNom(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur:
             return obj.livraison.livreur.utilisateur.nom_complet
-        return "Non assigné"
+        return None
 
     def get_coursierPhoto(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur and obj.livraison.livreur.utilisateur.photo:
-            return obj.livraison.livreur.utilisateur.photo.url
-        return "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
+            return construire_url_absolue(self.context.get("request"), obj.livraison.livreur.utilisateur.photo)
+        return None
 
     def get_coursierTelephone(self, obj):
         if hasattr(obj, "livraison") and obj.livraison and obj.livraison.livreur:
@@ -284,7 +323,7 @@ class SerializerUtilisateurAdministration(serializers.Serializer):
         badges = {
             "CLIENT": "CLIENT STANDARD",
             "RESTAURANT": "PARTENAIRE PRO",
-            "LIVREUR": "LIVREUR CERTIFIÉ",
+            "LIVREUR": "LIVREUR",
             "ADMINISTRATEUR": "ADMIN SYSTÈME",
         }
         return badges.get(obj.role, "UTILISATEUR")
@@ -310,14 +349,14 @@ class SerializerUtilisateurAdministration(serializers.Serializer):
     def get_dateInscription(self, obj):
         if obj.date_creation:
             return obj.date_creation.strftime("%d %b. %Y")
-        return "Récemment"
+        return ""
 
     def get_statut(self, obj):
         return "ACTIF" if obj.is_active else "INACTIF"
 
     def get_photoUrl(self, obj):
         if obj.photo:
-            return obj.photo.url
+            return construire_url_absolue(self.context.get("request"), obj.photo)
         return None
 
     def get_nombreCommandes(self, obj):

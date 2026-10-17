@@ -66,7 +66,9 @@ def commande_a_payer(db):
 
 @pytest.mark.django_db
 class TestPaiementsPayTech:
-    def test_initiation_paiement_paytech(self, commande_a_payer, monkeypatch):
+    def test_initiation_paiement_paytech(self, commande_a_payer, settings, monkeypatch):
+        settings.PAYTECH_CLE_API = "cle_api_test_123"
+        settings.PAYTECH_CLE_SECRETE = "cle_secrete_test_456"
         class ReponseMock:
             status_code = 200
 
@@ -193,17 +195,18 @@ class TestPaiementsPayTech:
 
         with pytest.raises(ErreurMetier) as exc:
             traiter_notification_ipn_paytech(payload_ipn)
-        assert "Signature cryptographique PayTech invalide" in str(exc.value)
+        assert exc.value.code == "signature_invalide"
 
     def test_annulation_paiement_ipn(self, commande_a_payer, settings):
-        settings.PAYTECH_CLE_API = ""
-        settings.PAYTECH_CLE_SECRETE = ""
-
-        tentative = initier_demande_paiement_paytech(commande_a_payer)
+        settings.PAYTECH_CLE_API = "cle_api_test_123"
+        settings.PAYTECH_CLE_SECRETE = "cle_secrete_test_456"
+        tentative = TentativePaiement.objects.create(commande=commande_a_payer, montant_fcfa=6000)
 
         payload_ipn = {
             "type_event": "sale_canceled",
             "ref_command": tentative.reference_paiement,
+            "api_key_sha256": hashlib.sha256(b"cle_api_test_123").hexdigest(),
+            "api_secret_sha256": hashlib.sha256(b"cle_secrete_test_456").hexdigest(),
         }
 
         tentative_maj = traiter_notification_ipn_paytech(payload_ipn)

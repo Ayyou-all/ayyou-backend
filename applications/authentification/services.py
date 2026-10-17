@@ -64,7 +64,17 @@ def creer_compte(donnees: dict) -> Utilisateur:
             "nom_utilisateur": generer_nom_utilisateur_unique(nom_etablissement),
             "adresse": donnees.get("adresse", ""),
             "telephone": utilisateur.telephone,
+            "latitude": donnees.get("latitude"),
+            "longitude": donnees.get("longitude"),
+            "specialite": donnees.get("specialite", ""),
+            "heure_ouverture": donnees.get("heure_ouverture"),
+            "heure_fermeture": donnees.get("heure_fermeture"),
+            "jours_ouverture": donnees.get("jours_ouverture") or "0,1,2,3,4,5,6",
+            "numero_reversement": donnees.get("numero_reversement", ""),
+            "operateur_reversement": donnees.get("operateur_reversement", ""),
         }
+        if donnees.get("delai_livraison_texte"):
+            etab_kwargs["delai_livraison_texte"] = donnees["delai_livraison_texte"]
         if donnees.get("logo"):
             etab_kwargs["logo"] = donnees["logo"]
         if donnees.get("couverture"):
@@ -89,6 +99,8 @@ def creer_compte(donnees: dict) -> Utilisateur:
             nom_vehicule=donnees.get("nom_vehicule", "").strip(),
             immatriculation=donnees.get("immatriculation", "").strip(),
             zone_principale=donnees.get("zone_principale", "").strip(),
+            numero_reversement=donnees.get("numero_reversement", "").replace(" ", ""),
+            operateur_reversement=donnees.get("operateur_reversement", ""),
         )
 
         # Enregistrement des documents du livreur (permis recto/verso)
@@ -267,3 +279,19 @@ def verifier_code_email(courriel: str, code: str, type_action: str = "INSCRIPTIO
     dernier_code.marquer_utilise()
     return True
 
+
+
+DUREE_VALIDITE_VERIFICATION_MINUTES = 30
+
+
+def courriel_recemment_verifie(courriel: str, type_action: str = "INSCRIPTION") -> bool:
+    """
+    Vrai si l'utilisateur a saisi le bon code pour cette adresse il y a moins de 30 minutes.
+    Empêche de créer un compte en appelant directement l'API d'inscription sans vérifier l'e-mail.
+    """
+    limite = timezone.now() - timedelta(minutes=DUREE_VALIDITE_VERIFICATION_MINUTES)
+    return CodeVerificationEmail.objects.filter(
+        courriel=courriel.strip().lower(),
+        type_action=type_action,
+        date_verification__gte=limite,
+    ).exists()
