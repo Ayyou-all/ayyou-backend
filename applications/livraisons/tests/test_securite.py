@@ -13,6 +13,7 @@ Tests de sécurité (Phase 1 de la correction après audit).
 
 
 import pytest
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
@@ -35,7 +36,11 @@ def creer_livreur(courriel, telephone, valide=True):
     utilisateur = creer_utilisateur(courriel, telephone, Role.LIVREUR)
     statut = StatutValidationPartenaire.ACTIF if valide else StatutValidationPartenaire.EN_ATTENTE_VALIDATION
     disponibilite = DisponibiliteLivreur.EN_LIGNE if valide else DisponibiliteLivreur.HORS_LIGNE
-    return ProfilLivreur.objects.create(utilisateur=utilisateur, statut_validation=statut, disponibilite=disponibilite)
+    # Position GPS récente à Dakar : le dispatch ne propose des courses qu'aux livreurs localisés.
+    return ProfilLivreur.objects.create(
+        utilisateur=utilisateur, statut_validation=statut, disponibilite=disponibilite,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
+    )
 
 
 def client_api(utilisateur=None):

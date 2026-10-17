@@ -29,7 +29,9 @@ from .serializers import (
 )
 from .services import (
     accepter_mission_livraison,
+    annuler_course_par_livreur,
     changer_disponibilite,
+    declarer_echec_livraison,
     demarrer_trajet_vers_client,
     exiger_livraison_active,
     lister_courses_disponibles,
@@ -38,6 +40,7 @@ from .services import (
     obtenir_livraison_active,
     obtenir_profil_livreur,
     pointer_article_au_guichet,
+    refuser_course,
     signaler_arrivee_domicile_client,
     valider_livraison_avec_pin,
 )
@@ -59,6 +62,7 @@ class VuePropositionsCourses(APIView):
     def get(self, request):
         profil = obtenir_profil_livreur(request.user)
         courses = lister_courses_disponibles(profil)
+        # Sans position GPS récente, la liste est vide : l'écran livreur affiche alors « Activez votre GPS ».
         return Response(SerializerPropositionLivraison(courses, many=True).data)
 
 
@@ -71,6 +75,39 @@ class VueAccepterMission(APIView):
         profil = obtenir_profil_livreur(request.user)
         livraison = accepter_mission_livraison(trouver_commande(commande_id), profil)
         return Response(SerializerLivraisonEnCours(livraison).data, status=status.HTTP_201_CREATED)
+
+
+class VueRefuserCourse(APIView):
+    """POST /api/livraisons/<commande>/refuser/ : la course ne sera plus proposée à ce livreur."""
+
+    permission_classes = [EstLivreur]
+
+    def post(self, request, commande_id):
+        refuser_course(obtenir_profil_livreur(request.user), trouver_commande(commande_id))
+        return Response({"succes": True})
+
+
+class VueAnnulerCourse(APIView):
+    """POST /api/livraisons/mission-en-cours/annuler/ {"motif": "..."} : avant récupération seulement."""
+
+    permission_classes = [EstLivreur]
+
+    def post(self, request):
+        annuler_course_par_livreur(obtenir_profil_livreur(request.user), str(request.data.get("motif", "")))
+        return Response({"succes": True, "message": "Course annulée. Elle est proposée à un autre livreur."})
+
+
+class VueEchecLivraison(APIView):
+    """
+    POST /api/livraisons/mission-en-cours/echec/ {"motif": "CLIENT_ABSENT"}
+    Motifs : CLIENT_ABSENT, CLIENT_INJOIGNABLE, ADRESSE_INCORRECTE, PROBLEME_VEHICULE, PROBLEME_RESTAURANT.
+    """
+
+    permission_classes = [EstLivreur]
+
+    def post(self, request):
+        declarer_echec_livraison(obtenir_profil_livreur(request.user), str(request.data.get("motif", "")))
+        return Response({"succes": True, "message": "Échec enregistré. Le support AYYOU va traiter la commande."})
 
 
 class VueMissionEnCours(APIView):
@@ -87,6 +124,7 @@ class VueMissionEnCours(APIView):
             "mission_active": True,
             "livraison": SerializerLivraisonEnCours(livraison).data,
             "est_bloquee": livraison_est_bloquee(livraison),
+            "remise_confirmee": livraison.date_remise_restaurant is not None,
         })
 
 

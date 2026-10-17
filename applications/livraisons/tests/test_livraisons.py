@@ -10,6 +10,7 @@ Scénarios testés :
 """
 
 import pytest
+from django.utils import timezone
 
 from applications.commandes.models import Commande, LigneCommande, StatutCommande
 from applications.communs.choix import StatutValidationPartenaire
@@ -66,6 +67,7 @@ def environnement_livraison(db):
         nom_vehicule="Kymco Agility 125",
         statut_validation=StatutValidationPartenaire.ACTIF,
         disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
     )
     etablissement = Etablissement.objects.create(
         gerant=gerant,
@@ -112,8 +114,8 @@ class TestLivraisons:
         profil = environnement_livraison["profil_livreur"]
         courses = lister_courses_disponibles(profil)
 
-        assert courses.count() == 1
-        assert courses.first().id == environnement_livraison["commande"].id
+        assert len(courses) == 1
+        assert courses[0].id == environnement_livraison["commande"].id
 
     def test_acceptation_mission_coursier(self, environnement_livraison):
         profil = environnement_livraison["profil_livreur"]
@@ -141,7 +143,7 @@ class TestLivraisons:
         commande.save(update_fields=["statut"])
 
         courses = lister_courses_disponibles(profil)
-        assert courses.filter(id=commande.id).exists() is False
+        assert commande not in courses
 
     def test_double_acceptation_concurrente_rejetee(self, environnement_livraison):
         profil1 = environnement_livraison["profil_livreur"]
@@ -160,6 +162,7 @@ class TestLivraisons:
             type_vehicule=TypeVehicule.SCOOTER,
             statut_validation=StatutValidationPartenaire.ACTIF,
             disponibilite=DisponibiliteLivreur.EN_LIGNE,
+        latitude=14.6928, longitude=-17.4467, date_derniere_position=timezone.now(),
         )
 
         accepter_mission_livraison(commande, profil1)

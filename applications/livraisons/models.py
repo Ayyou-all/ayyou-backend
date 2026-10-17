@@ -88,3 +88,30 @@ class Livraison(models.Model):
 
     def __str__(self) -> str:
         return f"Livraison {self.commande.reference} ({self.etape})"
+
+
+class MotifEchecLivraison(models.TextChoices):
+    """Raisons possibles d'un échec de livraison (choisies par le livreur)."""
+
+    CLIENT_ABSENT = "CLIENT_ABSENT", "Client absent"
+    CLIENT_INJOIGNABLE = "CLIENT_INJOIGNABLE", "Client injoignable"
+    ADRESSE_INCORRECTE = "ADRESSE_INCORRECTE", "Adresse incorrecte"
+    PROBLEME_VEHICULE = "PROBLEME_VEHICULE", "Problème de véhicule"
+    PROBLEME_RESTAURANT = "PROBLEME_RESTAURANT", "Problème avec le restaurant"
+
+
+class CourseRefusee(models.Model):
+    """
+    Une course refusée (ou annulée) par un livreur ne lui est plus proposée.
+    Les autres livreurs continuent de la voir.
+    """
+
+    livreur = models.ForeignKey(ProfilLivreur, on_delete=models.CASCADE, related_name="courses_refusees")
+    commande = models.ForeignKey("commandes.Commande", on_delete=models.CASCADE, related_name="refus_livreurs")
+    date_refus = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["livreur", "commande"], name="uniq_refus_livreur_commande")]
+
+    def __str__(self) -> str:
+        return f"{self.livreur} a refusé {self.commande.reference}"

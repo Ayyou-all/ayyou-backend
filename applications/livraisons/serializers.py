@@ -110,6 +110,7 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
     client_telephone = serializers.CharField(source="commande.telephone_contact", read_only=True)
     client_adresse = serializers.CharField(source="commande.adresse_livraison", read_only=True)
     client_instructions = serializers.CharField(source="commande.instructions_livraison", read_only=True)
+    client_repere = serializers.CharField(source="commande.repere_livraison", read_only=True)
     restaurant_latitude = serializers.SerializerMethodField()
     restaurant_longitude = serializers.SerializerMethodField()
     client_latitude = serializers.SerializerMethodField()
@@ -134,6 +135,7 @@ class SerializerLivraisonEnCours(serializers.ModelSerializer):
             "client_telephone",
             "client_adresse",
             "client_instructions",
+            "client_repere",
             "restaurant_latitude",
             "restaurant_longitude",
             "client_latitude",
