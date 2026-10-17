@@ -32,7 +32,7 @@ def lire_liste(nom_variable: str, valeur_par_defaut: str = "") -> list[str]:
 
 
 # --- Sécurité -----------------------------------------------------------------
-DEBUG = lire_booleen("AYYOU_DEBUG", True)
+DEBUG = lire_booleen("AYYOU_DEBUG", False)
 SECRET_KEY = os.getenv("AYYOU_CLE_SECRETE_DJANGO", "")
 if not SECRET_KEY:
     if not DEBUG:
@@ -80,6 +80,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Annule les commandes expirées (au plus une fois par minute)
+    "applications.commandes.expirations.MiddlewareExpirations",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -222,7 +224,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --- CORS (Cross-Origin Resource Sharing) -------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True
+# Toutes les origines sont acceptées en développement uniquement ; en production, seule la liste ci-dessous l'est.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
@@ -235,6 +238,7 @@ CORS_ALLOWED_ORIGINS = [
 ] + [origine for origine in lire_liste("AYYOU_ORIGINES_FRONTEND", "https://ayyou.site,http://localhost:2401,http://127.0.0.1:2401") if origine]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://(www\.)?ayyou\.site$",
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
 ]
@@ -263,6 +267,25 @@ CORS_ALLOW_HEADERS = [
 # --- Paramètres métier AYYOU --------------------------------------------------
 FRAIS_LIVRAISON_PAR_DEFAUT_FCFA = int(os.getenv("AYYOU_FRAIS_LIVRAISON_DEFAUT_FCFA", "1000"))
 NOMBRE_MAX_ESSAIS_CODE_LIVRAISON = 5
+# Part des frais de livraison reversée au livreur (en %). Le reste revient à la plateforme.
+# Valeur à confirmer par la direction : elle est volontairement configurable.
+PART_LIVREUR_FRAIS_LIVRAISON_POURCENT = int(os.getenv("AYYOU_PART_LIVREUR_POURCENT", "80"))
+# Commission prélevée sur le montant des plats (en %). 0 tant que le modèle économique n'est pas décidé.
+COMMISSION_RESTAURANT_POURCENT = int(os.getenv("AYYOU_COMMISSION_RESTAURANT_POURCENT", "0"))
+
+# Dispatch : rayon (km) autour du restaurant dans lequel les livreurs voient la course.
+# Le rayon s'élargit tant que personne n'accepte (recherche élargie).
+DISPATCH_RAYON_INITIAL_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_INITIAL_KM", "3"))
+DISPATCH_RAYON_PAS_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_PAS_KM", "2"))
+DISPATCH_MINUTES_PAR_PAS = int(os.getenv("AYYOU_DISPATCH_MINUTES_PAR_PAS", "2"))
+DISPATCH_RAYON_MAX_KM = float(os.getenv("AYYOU_DISPATCH_RAYON_MAX_KM", "15"))
+# Une position GPS plus ancienne que ce délai n'est plus considérée comme fiable.
+GPS_POSITION_VALIDE_MINUTES = int(os.getenv("AYYOU_GPS_POSITION_VALIDE_MINUTES", "5"))
+
+# Délais métier (en minutes) utilisés par applications/commandes/expirations.py
+DELAI_PAIEMENT_MINUTES = int(os.getenv("AYYOU_DELAI_PAIEMENT_MINUTES", "15"))
+DELAI_ACCEPTATION_RESTAURANT_MINUTES = int(os.getenv("AYYOU_DELAI_ACCEPTATION_RESTAURANT_MINUTES", "5"))
+DELAI_ALERTE_SANS_LIVREUR_MINUTES = int(os.getenv("AYYOU_DELAI_ALERTE_SANS_LIVREUR_MINUTES", "10"))
 URL_FRONTEND = os.getenv("AYYOU_URL_FRONTEND", "http://localhost:4200")
 URL_PUBLIQUE_BACKEND = os.getenv("AYYOU_URL_PUBLIQUE_BACKEND", "http://localhost:8000")
 
@@ -311,6 +334,8 @@ PAYTECH_DELAI_ATTENTE_SECONDES = int(os.getenv("PAYTECH_DELAI_ATTENTE_SECONDES",
 
 # --- Service IA (FastAPI) -----------------------------------------------------
 SERVICE_IA_URL = os.getenv("AYYOU_SERVICE_IA_URL", "http://127.0.0.1:8001")
+# La valeur par défaut est conservée pour rester compatible avec le conteneur IA actuel,
+# qui ne reçoit aucune variable d'environnement depuis docker-compose.
 SERVICE_IA_CLE_INTERNE = os.getenv("AYYOU_SERVICE_IA_CLE_INTERNE", "cle-secrete-interne-ayyou-ia-2026")
 SERVICE_IA_DELAI_ATTENTE_SECONDES = int(os.getenv("AYYOU_SERVICE_IA_DELAI_SECONDES", "8"))
 

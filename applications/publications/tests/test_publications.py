@@ -153,14 +153,14 @@ def test_toggle_like_publication(donnees_publications):
     rep1 = client_api.post(f"/api/publications/{pub.id}/like/")
     assert rep1.status_code == 200
     assert rep1.json()["estAime"] is True
-    assert rep1.json()["nombreJeaime"] == "1"
+    assert rep1.json()["nombreJeaime"] == 1
     assert MentionJeaime.objects.filter(utilisateur=client_user, publication=pub).exists()
 
     # 2. Deuxième clic : j'aime retiré
     rep2 = client_api.post(f"/api/publications/{pub.id}/like/")
     assert rep2.status_code == 200
     assert rep2.json()["estAime"] is False
-    assert rep2.json()["nombreJeaime"] == "0"
+    assert rep2.json()["nombreJeaime"] == 0
     assert not MentionJeaime.objects.filter(utilisateur=client_user, publication=pub).exists()
 
 
@@ -199,3 +199,42 @@ def test_gestion_studio_gerant(donnees_publications):
     rep_del = client_api.delete(f"/api/publications/studio/{pub_id}/")
     assert rep_del.status_code == 204
     assert not Publication.objects.filter(pk=pub_id).exists()
+
+
+# --- Phase 8 : vues et likes comptés par le serveur --------------------------------
+
+
+@pytest.mark.django_db
+def test_vue_comptee_une_seule_fois_par_personne(donnees_publications):
+    from django.core.cache import cache
+
+    cache.clear()
+    publication = Publication.objects.create(
+        etablissement=donnees_publications["etablissement"], titre="Thieb du jour", type_media="IMAGE"
+    )
+    anonyme = APIClient()
+    premiere = anonyme.post(f"/api/publications/{publication.id}/vue/").json()
+    seconde = anonyme.post(f"/api/publications/{publication.id}/vue/").json()
+    assert premiere == {"comptee": True, "nombreVues": 1}
+    assert seconde == {"comptee": False, "nombreVues": 1}
+
+    connecte = APIClient()
+    connecte.force_authenticate(donnees_publications["client"])
+    assert connecte.post(f"/api/publications/{publication.id}/vue/").json()["nombreVues"] == 2
+    # Le compteur affiché dans le fil vient de la base
+    fil = anonyme.get("/api/publications/fil/").json()
+    liste = fil["results"] if isinstance(fil, dict) else fil
+    assert liste[0]["nombreVues"] == 2
+
+
+@pytest.mark.django_db
+def test_like_sans_doublon_et_compteur_reel(donnees_publications):
+    publication = Publication.objects.create(
+        etablissement=donnees_publications["etablissement"], titre="Thieb du jour", type_media="IMAGE"
+    )
+    api = APIClient()
+    api.force_authenticate(donnees_publications["client"])
+    assert api.post(f"/api/publications/{publication.id}/like/").json()["nombreJeaime"] == 1
+    assert api.post(f"/api/publications/{publication.id}/like/").json() == {
+        "estAime": False, "nombreJeaime": 0, "message": "Mention J'aime retirée."
+    }

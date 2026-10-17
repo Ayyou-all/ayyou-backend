@@ -36,7 +36,9 @@ class VuePanier(APIView):
         return _reponse_panier(request)
 
     def delete(self, request):
-        vider_panier(request.user)
+        # ?etablissement=<id> vide seulement le panier de ce restaurant
+        etablissement_id = request.query_params.get("etablissement")
+        vider_panier(request.user, etablissement_id=int(etablissement_id) if str(etablissement_id).isdigit() else None)
         return _reponse_panier(request)
 
 
