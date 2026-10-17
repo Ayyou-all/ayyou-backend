@@ -13,3 +13,9 @@ def hachage_rapide_des_mots_de_passe(settings):
     sans ce réglage, chaque compte créé dans un test coûte près d'une seconde.
     """
     settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
+@pytest.fixture(autouse=True)
+def dossier_medias_temporaire(settings, tmp_path):
+    """Les fichiers envoyés pendant les tests vont dans un dossier jetable, jamais dans le vrai dossier medias/."""
+    settings.MEDIA_ROOT = tmp_path / "medias"
