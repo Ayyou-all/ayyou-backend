@@ -233,6 +233,25 @@ class VueMarquerPreteCommande(APIView):
         return Response(SerializerCommandeRestaurant(commande_maj).data)
 
 
+class VueStatistiquesRestaurant(APIView):
+    """
+    GET /api/commandes/restaurant/statistiques/?periode=24h|7j|30j
+    Indicateurs du restaurant calculés sur les vraies commandes (voir commandes/statistiques.py).
+    """
+
+    permission_classes = [EstGerantEtablissement]
+
+    def get(self, request):
+        from applications.etablissements.services import obtenir_etablissement_du_gerant
+
+        from .statistiques import statistiques_tableau_de_bord
+
+        periode = request.query_params.get("periode", "7j")
+        if periode not in ("24h", "7j", "30j"):
+            periode = "7j"
+        return Response(statistiques_tableau_de_bord(obtenir_etablissement_du_gerant(request.user), periode))
+
+
 class VueRemettreAuLivreur(APIView):
     """POST /api/commandes/<id>/remettre-au-livreur/ : le restaurant confirme la remise du sac au livreur."""
 
