@@ -176,6 +176,13 @@ class SerializerCommandeAdministration(serializers.Serializer):
     paiementARembourser = serializers.SerializerMethodField()
     remiseConfirmee = serializers.SerializerMethodField()
     historique = serializers.SerializerMethodField()
+    livraisonBloquee = serializers.SerializerMethodField()
+
+    def get_livraisonBloquee(self, obj):
+        from applications.livraisons.services import livraison_est_bloquee
+
+        livraison = getattr(obj, "livraison", None)
+        return bool(livraison and livraison_est_bloquee(livraison))
 
     def get_paiementConfirme(self, obj):
         return any(t.statut in ("CONFIRME", "REMBOURSE") for t in obj.tentatives_paiement.all())
