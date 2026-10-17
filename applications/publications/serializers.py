@@ -32,6 +32,7 @@ class SerializerPublicationFil(serializers.ModelSerializer):
     nombreJeaime = serializers.SerializerMethodField()
     estAime = serializers.SerializerMethodField()
     nombrePartages = serializers.IntegerField(source="nombre_partages", read_only=True)
+    nombreVues = serializers.IntegerField(source="nombre_vues", read_only=True)
 
     class Meta:
         model = Publication
@@ -50,6 +51,7 @@ class SerializerPublicationFil(serializers.ModelSerializer):
             "nombreJeaime",
             "estAime",
             "nombrePartages",
+            "nombreVues",
         ]
 
     def get_nomUtilisateurRestaurant(self, obj):
