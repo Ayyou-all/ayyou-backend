@@ -75,12 +75,20 @@ class SerializerMonEtablissement(SerializerEtablissementPublic):
     logo = serializers.FileField(required=False, allow_null=True, write_only=True, validators=[valider_image])
     couverture = serializers.FileField(required=False, allow_null=True, write_only=True, validators=[valider_image])
 
+    # État de l'abonnement (essai, actif, suspendu), calculé par le backend
+    abonnement = serializers.SerializerMethodField()
+
     class Meta(SerializerEtablissementPublic.Meta):
         fields = SerializerEtablissementPublic.Meta.fields + [
             "telephone", "logo", "couverture", "statut_validation", "motif_decision",
-            "numero_reversement", "operateur_reversement",
+            "numero_reversement", "operateur_reversement", "abonnement",
         ]
         read_only_fields = ["id", "type_etablissement", "statut_validation", "motif_decision", "nom_utilisateur"]
+
+    def get_abonnement(self, etablissement) -> dict:
+        from applications.paiements.abonnement import resume_abonnement
+
+        return resume_abonnement(etablissement)
 
     def validate_jours_ouverture(self, valeur):
         jours = [jour.strip() for jour in valeur.split(",") if jour.strip()]

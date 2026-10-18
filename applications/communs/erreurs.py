@@ -43,6 +43,18 @@ class AccesRefuse(ErreurMetier):
         super().__init__(message, code="acces_refuse")
 
 
+class AbonnementRequis(ErreurMetier):
+    """Restaurant suspendu : essai terminé et aucun abonnement actif (HTTP 403, code « abonnement_requis »)."""
+
+    statut_http = status.HTTP_403_FORBIDDEN
+
+    def __init__(self):
+        super().__init__(
+            "Votre période d'essai ou votre abonnement est terminé. Activez votre abonnement pour continuer.",
+            code="abonnement_requis",
+        )
+
+
 class ServiceExterneIndisponible(ErreurMetier):
     """Un fournisseur externe (PayTech, service IA) ne répond pas (HTTP 503)."""
 

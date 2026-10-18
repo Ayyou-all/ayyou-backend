@@ -10,6 +10,8 @@ Fournit :
 
 from datetime import datetime
 from django.db.models import Count, F, Sum
+
+from applications.etablissements.models import filtre_abonnement_valide
 from django.utils import timezone
 
 from applications.catalogue.models import Plat
@@ -44,6 +46,7 @@ def recommander_plats_pour_client(utilisateur, budget_max: int = None, limite: i
     """
     plats_qs = (
         Plat.objects.filter(
+            filtre_abonnement_valide("etablissement__"),
             est_disponible=True,
             est_archive=False,
             etablissement__statut_validation="ACTIF",
@@ -137,6 +140,7 @@ def repondre_au_message_chatbot(message_texte: str, budget_fcfa: int = None, qua
     """
     plats_qs = (
         Plat.objects.filter(
+            filtre_abonnement_valide("etablissement__"),
             est_disponible=True,
             est_archive=False,
             etablissement__statut_validation="ACTIF",

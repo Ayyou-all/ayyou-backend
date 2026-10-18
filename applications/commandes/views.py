@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 
 from applications.communs.erreurs import AccesRefuse
 from applications.etablissements.services import obtenir_etablissement_du_gerant
-from applications.utilisateurs.permissions import EstClient, EstGerantEtablissement, EstLivreur
+from applications.utilisateurs.permissions import AbonnementValide, EstClient, EstGerantEtablissement, EstLivreur
 
 from .models import STATUTS_COMMANDES_EN_COURS, Commande, HistoriqueStatutCommande, StatutCommande
 from .serializers import (
@@ -195,7 +195,8 @@ class VueAnnulerCommandeClient(APIView):
 class VueAccepterCommande(APIView):
     """Le gérant accepte la commande et définit le temps de préparation estimé."""
 
-    permission_classes = [EstGerantEtablissement]
+    # Un restaurant suspendu (abonnement requis) ne peut plus accepter de nouvelle commande.
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
 
     def post(self, request, pk):
         commande = get_commande_par_pk_ou_reference(pk)
@@ -264,7 +265,7 @@ class VueStatistiquesRestaurant(APIView):
     Indicateurs du restaurant calculés sur les vraies commandes (voir commandes/statistiques.py).
     """
 
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
 
     def get(self, request):
         from applications.etablissements.services import obtenir_etablissement_du_gerant

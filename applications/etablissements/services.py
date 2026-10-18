@@ -4,7 +4,7 @@ from django.utils.text import slugify
 
 from applications.communs.erreurs import ErreurMetier
 
-from .models import Etablissement
+from .models import Etablissement, filtre_abonnement_valide
 
 
 def generer_nom_utilisateur_unique(nom_etablissement: str) -> str:
@@ -26,5 +26,8 @@ def obtenir_etablissement_du_gerant(utilisateur) -> Etablissement:
 
 
 def obtenir_etablissements_visibles():
-    """Établissements visibles du public : uniquement ceux validés par l'administration."""
-    return Etablissement.objects.filter(statut_validation="ACTIF")
+    """
+    Établissements visibles du public : validés par l'administration ET en règle (essai ou abonnement).
+    Un restaurant suspendu faute d'abonnement est masqué, mais ses données sont conservées.
+    """
+    return Etablissement.objects.filter(filtre_abonnement_valide(), statut_validation="ACTIF")

@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from applications.utilisateurs.permissions import EstGerantEtablissement
+from applications.utilisateurs.permissions import AbonnementValide, EstGerantEtablissement
 
 from .serializers import SerializerRequeteChatbot, SerializerRequeteRecommandations
 from .services import (
@@ -86,7 +86,7 @@ class VuePrevisionsRestaurant(APIView):
     Prévisions d'affluence par heure et coups de feu en cuisine pour le restaurant du gérant.
     """
 
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
 
     def get(self, request):
         previsions = obtenir_previsions_etablissement(request.user)
@@ -98,7 +98,7 @@ class VueRapportHebdomadaireRestaurant(APIView):
     Rapport managérial hebdomadaire pour le restaurant du gérant.
     """
 
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
 
     def get(self, request):
         rapport = generer_rapport_hebdo_etablissement(request.user)

@@ -234,6 +234,12 @@ def traiter_notification_ipn_paytech(donnees: dict) -> TentativePaiement:
     if not ref_command:
         raise ErreurMetier("Paramètre ref_command manquant.", code="ipn_incomplet")
 
+    # Paiement d'abonnement d'un restaurant (référence « ABO-... ») : traité à part.
+    if str(ref_command).startswith("ABO-"):
+        from .abonnement import traiter_notification_abonnement
+
+        return traiter_notification_abonnement(donnees)
+
     tentative = TentativePaiement.objects.select_for_update().filter(reference_paiement=ref_command).first()
     if tentative is None:
         raise ErreurMetier(f"Paiement introuvable pour ref_command={ref_command}.", code="paiement_introuvable")
