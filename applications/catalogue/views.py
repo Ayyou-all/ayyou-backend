@@ -18,7 +18,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from applications.etablissements.services import obtenir_etablissement_du_gerant
-from applications.utilisateurs.permissions import EstGerantEtablissement
+from applications.utilisateurs.permissions import AbonnementValide, EstGerantEtablissement
 
 from .models import CategoriePlat, Plat
 from .serializers import SerializerCategoriePlat, SerializerDisponibilite, SerializerGestionPlat, SerializerPlat
@@ -56,7 +56,7 @@ class EnsembleVuesMesPlats(viewsets.ModelViewSet):
     """
 
     serializer_class = SerializerGestionPlat
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     pagination_class = None
     http_method_names = ["get", "post", "patch", "delete"]
