@@ -127,11 +127,15 @@ def alerter_commandes_sans_livreur() -> int:
 
 
 def traiter_commandes_expirees() -> dict:
-    """Lance les trois traitements et renvoie le nombre de commandes concernées par chacun."""
+    """Lance les traitements et renvoie le nombre d'éléments concernés par chacun."""
+    from applications.paiements.abonnement import traiter_echeances_abonnements
+
     return {
         "paiements_expires": expirer_paiements_non_recus(),
         "commandes_non_acceptees": expirer_commandes_non_acceptees(),
         "alertes_sans_livreur": alerter_commandes_sans_livreur(),
+        # Abonnements des restaurants : rappel J-3 et avis de suspension (une fois par échéance)
+        "echeances_abonnements": traiter_echeances_abonnements(),
     }
 
 

@@ -3,15 +3,22 @@ Vues HTTP d'administration de la plateforme AYYOU.
 Strictement réservées aux utilisateurs ayant le rôle ADMIN.
 """
 
+from datetime import timedelta
+
+from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from applications.communs.erreurs import ErreurMetier
-from applications.etablissements.models import Etablissement
+from applications.etablissements.models import Etablissement, StatutAbonnement
 from applications.livraisons.models import ProfilLivreur
+from applications.notifications.models import Notification, TypeNotification
+from applications.paiements.abonnement import filtre_statut_abonnement, resume_paiement, statistiques_abonnements
+from applications.paiements.models import PaiementAbonnement, StatutPaiement
 from applications.utilisateurs.permissions import EstAdministrateur
 
 from .serializers import (
@@ -293,3 +300,86 @@ class VueBasculerStatutUtilisateur(APIView):
             "message": f"Compte de {user.nom_complet} {'activé' if user.is_active else 'désactivé'} avec succès.",
         })
 
+
+
+# ---------------------------------------------------------------------------
+# Abonnements des restaurants (modèle économique). Chiffres calculés sur les paiements CONFIRMÉS.
+# ---------------------------------------------------------------------------
+class VueStatistiquesAbonnements(APIView):
+    """Indicateurs, derniers paiements confirmés et dernières alertes d'abonnement de l'admin connecté."""
+
+    permission_classes = [EstAdministrateur]
+
+    def get(self, request):
+        derniers = (
+            PaiementAbonnement.objects.filter(statut=StatutPaiement.CONFIRME)
+            .select_related("etablissement")
+            .order_by("-date_confirmation")[:10]
+        )
+        alertes = Notification.objects.filter(
+            destinataire=request.user, type_notification=TypeNotification.ABONNEMENT
+        )[:10]
+        return Response({
+            "statistiques": statistiques_abonnements(),
+            "derniers_paiements": [resume_paiement(paiement) for paiement in derniers],
+            "alertes": [
+                {"id": alerte.id, "titre": alerte.titre, "message": alerte.message,
+                 "date_creation": alerte.date_creation, "est_lue": alerte.est_lue}
+                for alerte in alertes
+            ],
+        })
+
+
+class VueAbonnementsRestaurants(generics.ListAPIView):
+    """
+    Liste des restaurants et de leur abonnement.
+    Filtres : ?recherche=nom, ?statut=ESSAI|ACTIF|SUSPENDU, ?periode=jour|semaine|mois|annee
+    (période = restaurants ayant un paiement confirmé dans la période).
+    """
+
+    permission_classes = [EstAdministrateur]
+    pagination_class = PaginationAdministration
+
+    def get_queryset(self):
+        parametres = self.request.query_params
+        restaurants = Etablissement.objects.annotate(
+            total_paye=Sum("paiements_abonnement__montant_fcfa", filter=Q(paiements_abonnement__statut=StatutPaiement.CONFIRME))
+        ).order_by("nom")
+        if recherche := parametres.get("recherche", "").strip():
+            restaurants = restaurants.filter(nom__icontains=recherche)
+        if (statut := parametres.get("statut")) in StatutAbonnement.values:
+            restaurants = restaurants.filter(filtre_statut_abonnement(statut))
+        debut_jour = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+        debuts = {
+            "jour": debut_jour,
+            "semaine": debut_jour - timedelta(days=debut_jour.weekday()),
+            "mois": debut_jour.replace(day=1),
+            "annee": debut_jour.replace(month=1, day=1),
+        }
+        if debut := debuts.get(parametres.get("periode", "")):
+            payes = PaiementAbonnement.objects.filter(statut=StatutPaiement.CONFIRME, date_confirmation__gte=debut)
+            restaurants = restaurants.filter(id__in=payes.values("etablissement_id"))
+        return restaurants
+
+    def list(self, request, *args, **kwargs):
+        page = self.paginate_queryset(self.get_queryset())
+        lignes = []
+        for restaurant in page:
+            paiements = restaurant.paiements_abonnement.exclude(statut=StatutPaiement.ANNULE)
+            dernier = paiements.first()
+            periode_en_cours = paiements.filter(statut=StatutPaiement.CONFIRME).order_by("-date_fin_periode").first()
+            lignes.append({
+                "id": restaurant.id,
+                "nom": restaurant.nom,
+                "statut_abonnement": restaurant.statut_abonnement,
+                "date_abonnement": periode_en_cours.date_debut_periode if periode_en_cours else None,
+                "date_expiration": restaurant.date_echeance_abonnement,
+                "jours_restants": restaurant.jours_restants_abonnement,
+                "total_paye_fcfa": restaurant.total_paye or 0,
+                "dernier_paiement": {
+                    "date": dernier.date_confirmation or dernier.date_creation,
+                    "montant_fcfa": dernier.montant_fcfa,
+                    "statut": dernier.statut,
+                } if dernier else None,
+            })
+        return self.get_paginated_response(lignes)

@@ -11,8 +11,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from applications.etablissements.models import filtre_abonnement_valide
 from applications.etablissements.services import obtenir_etablissement_du_gerant
-from applications.utilisateurs.permissions import EstGerantEtablissement
+from applications.utilisateurs.permissions import AbonnementValide, EstGerantEtablissement
 
 from .models import MentionJeaime, Publication
 from .serializers import (
@@ -30,7 +31,7 @@ class VueFilPublications(generics.ListAPIView):
 
     def get_queryset(self):
         qs = (
-            Publication.objects.filter(est_publie=True, etablissement__statut_validation="ACTIF")
+            Publication.objects.filter(filtre_abonnement_valide("etablissement__"), est_publie=True, etablissement__statut_validation="ACTIF")
             .select_related("etablissement", "plat")
             .prefetch_related("mentions_jeaime")
         )
@@ -125,7 +126,7 @@ class VueStudioPublications(APIView):
     - POST : Téléversement d'une nouvelle vidéo (max 300s) ou photo
     """
 
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
@@ -148,7 +149,7 @@ class VueStudioPublications(APIView):
 class VueSupprimerPublicationStudio(APIView):
     """Suppression d'une vidéo depuis son Ayyou Studio."""
 
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValide]
 
     def delete(self, request, pk):
         etablissement = obtenir_etablissement_du_gerant(request.user)

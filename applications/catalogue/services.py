@@ -2,13 +2,15 @@
 
 from django.db.models import Count, Q, QuerySet
 
+from applications.etablissements.models import filtre_abonnement_valide
+
 from .models import Plat
 
 
 def obtenir_plats_visibles() -> QuerySet:
-    """Plats non archivés d'établissements validés (ACTIF). Les indisponibles restent visibles mais grisés."""
+    """Plats non archivés d'établissements validés (ACTIF) et en règle (essai ou abonnement). Les indisponibles restent visibles mais grisés."""
     return (
-        Plat.objects.filter(est_archive=False, etablissement__statut_validation="ACTIF")
+        Plat.objects.filter(filtre_abonnement_valide("etablissement__"), est_archive=False, etablissement__statut_validation="ACTIF")
         .select_related("etablissement", "categorie")
     )
 

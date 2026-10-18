@@ -22,6 +22,7 @@ class TypeNotification(models.TextChoices):
     COMMANDE_ANNULEE = "COMMANDE_ANNULEE", "Commande annulée ou rejetée"
     NOUVELLE_PUBLICATION = "NOUVELLE_PUBLICATION", "Nouvelle vidéo d'un restaurant suivi"
     VALIDATION_COMPTE = "VALIDATION_COMPTE", "Validation ou refus de compte partenaire"
+    ABONNEMENT = "ABONNEMENT", "Abonnement restaurant (essai, paiement, échéance)"
     INFO_SYSTEME = "INFO_SYSTEME", "Information générale du système"
 
 

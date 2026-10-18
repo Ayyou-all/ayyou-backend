@@ -5,6 +5,9 @@ Endpoints :
 - POST /api/paiements/initier/ : Démarre le paiement et renvoie l'URL de checkout PayTech (Client)
 - POST /api/paiements/webhook-ipn/ : Webhook appelé par PayTech (Public, protégé par signature cryptographique)
 - GET  /api/paiements/<ref>/statut/ : Vérifie le statut d'un paiement (Client)
+- GET  /api/paiements/abonnement/ : état de l'abonnement du restaurant + historique (Gérant)
+- POST /api/paiements/abonnement/payer/ : lien PayTech pour payer 1 mois (Gérant)
+- POST /api/paiements/abonnement/verifier/ : demande le statut réel à PayTech au retour (Gérant)
 """
 
 from django.shortcuts import get_object_or_404
@@ -17,9 +20,12 @@ from rest_framework.views import APIView
 
 from applications.commandes.models import Commande
 from applications.communs.erreurs import AccesRefuse
-from applications.utilisateurs.permissions import EstClient
+from applications.etablissements.services import obtenir_etablissement_du_gerant
+from applications.utilisateurs.permissions import EstClient, EstGerantEtablissement
 
-from .models import TentativePaiement
+from .abonnement import initier_paiement_abonnement, resume_abonnement, resume_paiement, verifier_paiement_abonnement
+
+from .models import StatutPaiement, TentativePaiement
 from .serializers import SerializerDemandePaiement, SerializerReponsePaiement
 from .services import (
     initier_demande_paiement_paytech,
@@ -120,3 +126,52 @@ class VueVerifierPaiement(APIView):
 
         tentative = verifier_statut_paytech_en_ligne(commande_id=commande.id)
         return Response(SerializerReponsePaiement(tentative).data, status=status.HTTP_200_OK)
+
+
+
+# ---------------------------------------------------------------------------
+# Abonnement mensuel du restaurant (gérant). Volontairement SANS AbonnementValide :
+# un restaurant suspendu doit pouvoir consulter son état et payer pour se réactiver.
+# ---------------------------------------------------------------------------
+def _etat_abonnement(etablissement) -> dict:
+    """État de l'abonnement + historique des paiements (les demandes abandonnées sont masquées)."""
+    paiements = (
+        etablissement.paiements_abonnement.exclude(statut=StatutPaiement.ANNULE)
+        .select_related("etablissement")[:24]
+    )
+    return {
+        "abonnement": resume_abonnement(etablissement),
+        "historique": [resume_paiement(paiement) for paiement in paiements],
+    }
+
+
+class VueMonAbonnement(APIView):
+    permission_classes = [EstGerantEtablissement]
+
+    def get(self, request):
+        return Response(_etat_abonnement(obtenir_etablissement_du_gerant(request.user)))
+
+
+class VuePayerAbonnement(APIView):
+    """Renvoie le lien PayTech. L'abonnement ne sera activé qu'à la confirmation de PayTech."""
+
+    permission_classes = [EstGerantEtablissement]
+
+    def post(self, request):
+        paiement = initier_paiement_abonnement(obtenir_etablissement_du_gerant(request.user))
+        return Response(
+            {"reference": paiement.reference_paiement, "url_redirection": paiement.url_redirection},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class VueVerifierAbonnement(APIView):
+    """Retour de la page PayTech : on demande le statut réel à PayTech, puis on renvoie l'état à jour."""
+
+    permission_classes = [EstGerantEtablissement]
+
+    def post(self, request):
+        etablissement = obtenir_etablissement_du_gerant(request.user)
+        verifier_paiement_abonnement(etablissement)
+        etablissement.refresh_from_db()
+        return Response(_etat_abonnement(etablissement))

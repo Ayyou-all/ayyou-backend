@@ -16,7 +16,7 @@ from rest_framework import generics
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 
-from applications.utilisateurs.permissions import EstGerantEtablissement
+from applications.utilisateurs.permissions import AbonnementValidePourModifier, EstGerantEtablissement
 
 from .serializers import SerializerEtablissementPublic, SerializerMonEtablissement
 from .services import obtenir_etablissement_du_gerant, obtenir_etablissements_visibles
@@ -56,7 +56,7 @@ class VueMonEtablissement(generics.RetrieveUpdateAPIView):
     """Le gérant consulte et modifie SON établissement (jamais celui d'un autre)."""
 
     serializer_class = SerializerMonEtablissement
-    permission_classes = [EstGerantEtablissement]
+    permission_classes = [EstGerantEtablissement, AbonnementValidePourModifier]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     http_method_names = ["get", "patch"]
 
