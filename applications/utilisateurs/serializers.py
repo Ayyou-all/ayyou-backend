@@ -7,6 +7,11 @@ from rest_framework import serializers
 from django.urls import reverse
 
 from applications.communs.fichiers import valider_document, valider_image
+from applications.communs.validation import (
+    texte_obligatoire,
+    valider_nouveau_mot_de_passe,
+    valider_telephone_unique,
+)
 from applications.communs.outils import construire_url_absolue
 
 from .models import DocumentJustificatif, TypeDocument, Utilisateur
@@ -65,6 +70,42 @@ class SerializerModificationProfil(serializers.ModelSerializer):
     class Meta:
         model = Utilisateur
         fields = ["prenom", "nom", "telephone", "adresse", "courriel", "photo", "preferences_alimentaires"]
+
+    def validate_prenom(self, valeur):
+        return texte_obligatoire(valeur, "Le prénom est obligatoire.")
+
+    def validate_nom(self, valeur):
+        return texte_obligatoire(valeur, "Le nom est obligatoire.")
+
+    def validate_telephone(self, valeur):
+        return valider_telephone_unique(valeur, self.instance)
+
+    def validate_courriel(self, valeur):
+        courriel = valeur.strip().lower()
+        if Utilisateur.objects.filter(courriel__iexact=courriel).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError("Cette adresse e-mail est déjà utilisée par un autre compte.")
+        return courriel
+
+
+class SerializerChangementMotDePasse(serializers.Serializer):
+    """Changement de mot de passe par l'utilisateur connecté (erreurs renvoyées champ par champ)."""
+
+    ancien_mot_de_passe = serializers.CharField(write_only=True)
+    nouveau_mot_de_passe = serializers.CharField(write_only=True)
+    confirmation_mot_de_passe = serializers.CharField(write_only=True)
+
+    def validate_ancien_mot_de_passe(self, valeur):
+        if not self.context["request"].user.check_password(valeur):
+            raise serializers.ValidationError("L'ancien mot de passe est incorrect.")
+        return valeur
+
+    def validate_nouveau_mot_de_passe(self, valeur):
+        return valider_nouveau_mot_de_passe(valeur, self.context["request"].user)
+
+    def validate(self, donnees):
+        if donnees["nouveau_mot_de_passe"] != donnees["confirmation_mot_de_passe"]:
+            raise serializers.ValidationError({"confirmation_mot_de_passe": "Les mots de passe ne correspondent pas."})
+        return donnees
 
 
 class SerializerDocumentJustificatif(serializers.ModelSerializer):

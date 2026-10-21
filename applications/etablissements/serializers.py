@@ -105,6 +105,21 @@ class SerializerMonEtablissement(SerializerEtablissementPublic):
             valider_eligibilite_zone_livraison(latitude, longitude)
         return attrs
 
+    def validate_nom(self, valeur):
+        from applications.communs.validation import texte_obligatoire
+
+        return texte_obligatoire(valeur, "Le nom du restaurant est obligatoire.")
+
+    def validate_telephone(self, valeur):
+        from applications.communs.validation import normaliser_telephone
+
+        return normaliser_telephone(valeur) if valeur.strip() else ""
+
+    def validate_numero_reversement(self, valeur):
+        from applications.communs.validation import normaliser_telephone
+
+        return normaliser_telephone(valeur) if valeur.strip() else ""
+
     def validate_frais_livraison_fcfa(self, valeur):
         if valeur > 10000:
             raise serializers.ValidationError("Frais de livraison anormalement élevés (max 10 000 FCFA).")

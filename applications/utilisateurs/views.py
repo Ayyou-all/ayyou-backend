@@ -16,7 +16,12 @@ from rest_framework.response import Response
 
 from .models import DocumentJustificatif, Role
 from .permissions import EstPartenaire
-from .serializers import SerializerDocumentJustificatif, SerializerModificationProfil, SerializerUtilisateur
+from .serializers import (
+    SerializerChangementMotDePasse,
+    SerializerDocumentJustificatif,
+    SerializerModificationProfil,
+    SerializerUtilisateur,
+)
 
 
 class VueMonProfil(generics.RetrieveUpdateAPIView):
@@ -57,26 +62,10 @@ class VueChangerMotDePasse(generics.GenericAPIView):
     parser_classes = [JSONParser, FormParser]
 
     def post(self, request, *args, **kwargs):
-        from applications.communs.erreurs import ErreurMetier
-
-        ancien = request.data.get("ancien_mot_de_passe")
-        nouveau = request.data.get("nouveau_mot_de_passe")
-        confirmation = request.data.get("confirmation_mot_de_passe")
-
-        if not ancien or not nouveau:
-            raise ErreurMetier("L'ancien mot de passe et le nouveau mot de passe sont obligatoires.", code="champs_requis")
-
-        if not request.user.check_password(ancien):
-            raise ErreurMetier("L'ancien mot de passe est incorrect.", code="ancien_mot_de_passe_incorrect")
-
-        if len(nouveau) < 8:
-            raise ErreurMetier("Le nouveau mot de passe doit comporter au moins 8 caractères.", code="mot_de_passe_trop_court")
-
-        if confirmation and nouveau != confirmation:
-            raise ErreurMetier("La confirmation ne correspond pas au nouveau mot de passe.", code="confirmation_differente")
-
-        request.user.set_password(nouveau)
-        request.user.save()
+        serializer = SerializerChangementMotDePasse(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data["nouveau_mot_de_passe"])
+        request.user.save(update_fields=["password"])
 
         return Response({"message": "Votre mot de passe a été modifié avec succès."})
 
