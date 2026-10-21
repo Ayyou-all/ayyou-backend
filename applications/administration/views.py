@@ -35,6 +35,7 @@ from .services import (
     appliquer_decision_etablissement,
     appliquer_decision_livreur,
     calculer_statistiques_globales,
+    envoyer_alerte_utilisateur,
 )
 
 
@@ -82,6 +83,12 @@ class VueLivreursModeration(generics.ListAPIView):
         return qs
 
 
+def _mention_email(email_envoye) -> str:
+    if email_envoye is None:
+        return ""
+    return " Le partenaire a été prévenu par e-mail." if email_envoye else " Attention : l'e-mail au partenaire n'a pas pu partir."
+
+
 class VueDecisionEtablissement(APIView):
     """Validation, suspension ou demande de correction d'un restaurant."""
 
@@ -107,7 +114,9 @@ class VueDecisionEtablissement(APIView):
                 "succes": True,
                 "id": maj.id,
                 "statutValidation": maj.statut_validation,
-                "message": f"Statut de l'établissement mis à jour vers {maj.statut_validation}.",
+                "emailEnvoye": maj.email_envoye,
+                "message": f"Statut de l'établissement mis à jour vers {maj.statut_validation}."
+                + _mention_email(maj.email_envoye),
             }
         )
 
@@ -137,7 +146,9 @@ class VueDecisionLivreur(APIView):
                 "succes": True,
                 "id": maj.id,
                 "statutValidation": maj.statut_validation,
-                "message": f"Statut du profil coursier mis à jour vers {maj.statut_validation}.",
+                "emailEnvoye": maj.email_envoye,
+                "message": f"Statut du profil coursier mis à jour vers {maj.statut_validation}."
+                + _mention_email(maj.email_envoye),
             }
         )
 
@@ -300,6 +311,26 @@ class VueBasculerStatutUtilisateur(APIView):
             "message": f"Compte de {user.nom_complet} {'activé' if user.is_active else 'désactivé'} avec succès.",
         })
 
+
+
+class VueAlerterUtilisateur(APIView):
+    """Envoie un avertissement de la modération à un utilisateur (notification + e-mail)."""
+
+    permission_classes = [EstAdministrateur]
+
+    def post(self, request, pk):
+        user = get_object_or_404(Utilisateur, pk=pk)
+        message = str(request.data.get("message", "")).strip()
+        if not message:
+            raise ErreurMetier("Le message ne peut pas être vide.", code="message_vide")
+        if len(message) > 2000:
+            raise ErreurMetier("Le message ne doit pas dépasser 2000 caractères.", code="message_trop_long")
+        resultat = envoyer_alerte_utilisateur(user, message)
+        if resultat["email_envoye"]:
+            texte = f"Avertissement envoyé à {user.nom_complet} (notification et e-mail)."
+        else:
+            texte = f"Notification envoyée à {user.nom_complet}, mais l'e-mail n'a pas pu partir."
+        return Response({"succes": True, **resultat, "message": texte})
 
 
 # ---------------------------------------------------------------------------

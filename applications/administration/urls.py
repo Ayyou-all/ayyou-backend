@@ -14,4 +14,5 @@ urlpatterns = [
     path("abonnements/statistiques/", views.VueStatistiquesAbonnements.as_view(), name="admin-abonnements-statistiques"),
     path("utilisateurs/", views.VueUtilisateursAdministration.as_view(), name="admin-liste-utilisateurs"),
     path("utilisateurs/<int:pk>/basculer-statut/", views.VueBasculerStatutUtilisateur.as_view(), name="admin-basculer-statut-utilisateur"),
+    path("utilisateurs/<int:pk>/alerter/", views.VueAlerterUtilisateur.as_view(), name="admin-alerter-utilisateur"),
 ]

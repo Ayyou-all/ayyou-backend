@@ -138,7 +138,7 @@ def test_transition_validation_interdite(donnees_admin):
     # Depuis ACTIF, seule la transition vers SUSPENDU est autorisée (pas DEMANDE_CORRECTION)
     rep = client_api.post(
         f"/api/administration/etablissements/{etablissement.id}/decision/",
-        {"nouveau_statut": StatutValidationPartenaire.DEMANDE_CORRECTION},
+        {"nouveau_statut": StatutValidationPartenaire.DEMANDE_CORRECTION, "motif_decision": "Photo floue."},
     )
     assert rep.status_code == 409  # TransitionInterdite renvoie 409
     assert "Transition de validation interdite" in rep.json()["message"]
@@ -163,3 +163,144 @@ def test_validation_coursier_succes(donnees_admin):
     profil_livreur.refresh_from_db()
     assert profil_livreur.statut_validation == StatutValidationPartenaire.ACTIF
     assert Notification.objects.filter(destinataire=coursier).exists()
+
+
+@pytest.mark.django_db
+def test_admin_envoie_une_alerte_notification_et_email(donnees_admin):
+    from django.core import mail
+
+    admin_client = APIClient()
+    admin_client.force_authenticate(user=donnees_admin["admin"])
+    cible = donnees_admin["client"]
+
+    reponse = admin_client.post(
+        f"/api/administration/utilisateurs/{cible.pk}/alerter/",
+        {"message": "Merci de respecter les conditions d'utilisation."},
+        format="json",
+    )
+
+    assert reponse.status_code == 200
+    assert reponse.data["email_envoye"] is True
+    notification = Notification.objects.get(destinataire=cible, titre="Message de la modération AYYOU")
+    assert "conditions d'utilisation" in notification.message
+    assert len(mail.outbox) == 1 and cible.courriel in mail.outbox[0].to
+
+
+@pytest.mark.django_db
+def test_alerte_vide_refusee_et_reservee_aux_admins(donnees_admin):
+    cible = donnees_admin["client"]
+    admin_client = APIClient()
+    admin_client.force_authenticate(user=donnees_admin["admin"])
+    assert admin_client.post(f"/api/administration/utilisateurs/{cible.pk}/alerter/", {"message": "  "}, format="json").status_code == 400
+
+    client_client = APIClient()
+    client_client.force_authenticate(user=cible)
+    assert client_client.post(f"/api/administration/utilisateurs/{cible.pk}/alerter/", {"message": "x"}, format="json").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# E-mail au partenaire après validation ou refus
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_validation_restaurant_envoie_un_email_d_activation(donnees_admin):
+    from django.core import mail
+
+    client_api = APIClient()
+    client_api.force_authenticate(user=donnees_admin["admin"])
+    etablissement = donnees_admin["etablissement"]
+
+    rep = client_api.post(
+        f"/api/administration/etablissements/{etablissement.id}/decision/",
+        {"nouveau_statut": StatutValidationPartenaire.ACTIF},
+    )
+
+    assert rep.status_code == 200
+    assert rep.json()["emailEnvoye"] is True
+    assert len(mail.outbox) == 1
+    email = mail.outbox[0]
+    assert email.to == [etablissement.gerant.courriel]
+    assert email.subject == "Votre compte AYYOU est activé"
+    assert etablissement.nom in email.body and "/connexion" in email.body
+
+
+@pytest.mark.django_db
+def test_refus_livreur_sans_motif_rejete(donnees_admin):
+    from django.core import mail
+
+    client_api = APIClient()
+    client_api.force_authenticate(user=donnees_admin["admin"])
+    profil_livreur = donnees_admin["profil_livreur"]
+
+    rep = client_api.post(
+        f"/api/administration/livreurs/{profil_livreur.id}/decision/",
+        {"nouveau_statut": StatutValidationPartenaire.SUSPENDU, "motif_decision": "   "},
+    )
+
+    assert rep.status_code == 400
+    assert "motif_decision" in rep.json()
+    profil_livreur.refresh_from_db()
+    assert profil_livreur.statut_validation == StatutValidationPartenaire.EN_ATTENTE_VALIDATION
+    assert len(mail.outbox) == 0
+
+
+@pytest.mark.django_db
+def test_refus_livreur_avec_motif_envoye_par_email(donnees_admin):
+    from django.core import mail
+
+    client_api = APIClient()
+    client_api.force_authenticate(user=donnees_admin["admin"])
+    profil_livreur = donnees_admin["profil_livreur"]
+
+    rep = client_api.post(
+        f"/api/administration/livreurs/{profil_livreur.id}/decision/",
+        {"nouveau_statut": StatutValidationPartenaire.SUSPENDU, "motif_decision": "Permis de conduire expiré."},
+    )
+
+    assert rep.status_code == 200
+    assert len(mail.outbox) == 1
+    email = mail.outbox[0]
+    assert email.to == [donnees_admin["coursier"].courriel]
+    assert email.subject == "Votre demande d'inscription AYYOU a été refusée"
+    assert "Motif : Permis de conduire expiré." in email.body
+
+
+@pytest.mark.django_db
+def test_demande_de_correction_envoie_le_motif(donnees_admin):
+    from django.core import mail
+
+    client_api = APIClient()
+    client_api.force_authenticate(user=donnees_admin["admin"])
+    etablissement = donnees_admin["etablissement"]
+
+    rep = client_api.post(
+        f"/api/administration/etablissements/{etablissement.id}/decision/",
+        {"nouveau_statut": StatutValidationPartenaire.DEMANDE_CORRECTION, "motif_decision": "Le RCCM est illisible."},
+    )
+
+    assert rep.status_code == 200
+    assert mail.outbox[0].subject == "Votre dossier AYYOU doit être complété"
+    assert "Le RCCM est illisible." in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+def test_echec_email_n_annule_pas_la_decision(donnees_admin, monkeypatch):
+    from applications.notifications import services as services_notifications
+
+    def envoi_en_echec(*args, **kwargs):
+        raise OSError("SMTP indisponible")
+
+    monkeypatch.setattr(services_notifications, "send_mail", envoi_en_echec)
+    client_api = APIClient()
+    client_api.force_authenticate(user=donnees_admin["admin"])
+    etablissement = donnees_admin["etablissement"]
+
+    rep = client_api.post(
+        f"/api/administration/etablissements/{etablissement.id}/decision/",
+        {"nouveau_statut": StatutValidationPartenaire.ACTIF},
+    )
+
+    assert rep.status_code == 200
+    assert rep.json()["emailEnvoye"] is False
+    assert "n'a pas pu partir" in rep.json()["message"]
+    etablissement.refresh_from_db()
+    assert etablissement.statut_validation == StatutValidationPartenaire.ACTIF
