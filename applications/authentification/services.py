@@ -157,11 +157,19 @@ def generer_jetons(utilisateur: Utilisateur) -> dict:
     }
 
 
+# Pour chaque usage du code : durée de validité (minutes) et motif affiché dans l'e-mail.
+PARAMETRES_CODE = {
+    TypeActionVerification.INSCRIPTION: (2, "pour votre inscription"),
+    TypeActionVerification.REINITIALISATION: (10, "pour réinitialiser votre mot de passe"),
+}
+
+
 def generer_et_envoyer_code_verification(courriel: str, type_action: str = "INSCRIPTION") -> dict:
     """
     Génère un code éphémère à 6 chiffres et l'envoie réellement par e-mail via SMTP.
     """
     courriel = courriel.strip().lower()
+    duree_minutes, motif = PARAMETRES_CODE.get(type_action, PARAMETRES_CODE[TypeActionVerification.INSCRIPTION])
     # Invalide les anciens codes actifs pour cette adresse
     CodeVerificationEmail.objects.filter(
         courriel=courriel,
@@ -171,8 +179,8 @@ def generer_et_envoyer_code_verification(courriel: str, type_action: str = "INSC
 
     # Génération sécurisée d'un code à 6 chiffres
     code = f"{secrets.randbelow(900000) + 100000}"
-    # Le code est valable 2 minutes (avec une marge de 30 secondes pour compenser la latence réseau)
-    date_expiration = timezone.now() + timedelta(minutes=2, seconds=30)
+    # Marge de 30 secondes pour compenser la latence réseau
+    date_expiration = timezone.now() + timedelta(minutes=duree_minutes, seconds=30)
 
     CodeVerificationEmail.objects.create(
         courriel=courriel,
@@ -184,11 +192,11 @@ def generer_et_envoyer_code_verification(courriel: str, type_action: str = "INSC
     sujet = f"Votre code de vérification AYYOU : {code}"
     corps_texte = f"""Bonjour,
 
-Voici votre code de vérification pour votre inscription sur la plateforme AYYOU :
+Voici votre code de vérification {motif} sur la plateforme AYYOU :
 
     {code}
 
-Ce code est valable pendant 2 minutes. Pour votre sécurité, ne le transmettez à personne.
+Ce code est valable pendant {duree_minutes} minutes. Pour votre sécurité, ne le transmettez à personne.
 
 Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.
 
@@ -206,7 +214,7 @@ Plateforme culinaire et de livraison à Dakar
             <div style="font-size: 38px; font-weight: 800; letter-spacing: 8px; color: #0f172a; margin: 12px 0; font-family: monospace; background: #ffffff; padding: 12px; border-radius: 12px; border: 1px dashed #cbd5e1; display: inline-block;">
                 {code}
             </div>
-            <p style="color: #94a3b8; font-size: 12px; margin: 12px 0 0 0;">⏱️ Ce code expire dans <strong>2 minutes</strong>.</p>
+            <p style="color: #94a3b8; font-size: 12px; margin: 12px 0 0 0;">⏱️ Ce code expire dans <strong>{duree_minutes} minutes</strong>.</p>
         </div>
         <p style="color: #64748b; font-size: 12px; line-height: 1.5; margin: 20px 0 0 0; text-align: center;">
             Si vous n'avez pas demandé ce code sur AYYOU, ignorez simplement cet e-mail en toute sérénité.
@@ -248,7 +256,7 @@ Plateforme culinaire et de livraison à Dakar
     return {
         "succes": True,
         "message": f"Code de vérification envoyé avec succès à {courriel}.",
-        "expiration_minutes": 2,
+        "expiration_minutes": duree_minutes,
     }
 
 
@@ -295,3 +303,44 @@ def courriel_recemment_verifie(courriel: str, type_action: str = "INSCRIPTION") 
         type_action=type_action,
         date_verification__gte=limite,
     ).exists()
+
+
+# ---------------------------------------------------------------------------
+# Mot de passe oublié : code à 6 chiffres envoyé par e-mail, puis nouveau mot de passe
+# ---------------------------------------------------------------------------
+MESSAGE_DEMANDE_REINITIALISATION = (
+    "Si un compte actif est associé à cette adresse, un code de réinitialisation vient d'y être envoyé."
+)
+
+
+def demander_reinitialisation_mot_de_passe(courriel: str) -> dict:
+    """
+    Envoie un code de réinitialisation si un compte actif existe.
+    La réponse est la même dans tous les cas : on ne révèle pas quelles adresses ont un compte.
+    """
+    courriel = courriel.strip().lower()
+    if Utilisateur.objects.filter(courriel__iexact=courriel, is_active=True).exists():
+        generer_et_envoyer_code_verification(courriel, TypeActionVerification.REINITIALISATION)
+    duree_minutes, _ = PARAMETRES_CODE[TypeActionVerification.REINITIALISATION]
+    return {"succes": True, "message": MESSAGE_DEMANDE_REINITIALISATION, "expiration_minutes": duree_minutes}
+
+
+@transaction.atomic
+def reinitialiser_mot_de_passe(courriel: str, code: str, nouveau_mot_de_passe: str) -> Utilisateur:
+    """Vérifie le code reçu, enregistre le nouveau mot de passe et ferme toutes les sessions ouvertes."""
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    utilisateur = Utilisateur.objects.filter(courriel__iexact=courriel.strip(), is_active=True).first()
+    if utilisateur is None:
+        # Même message qu'un code invalide : on ne révèle pas si le compte existe.
+        raise ErreurMetier(
+            "Le code de vérification est expiré ou invalide. Veuillez demander un nouveau code.",
+            code="code_expire",
+        )
+    verifier_code_email(courriel, code, TypeActionVerification.REINITIALISATION)
+    utilisateur.set_password(nouveau_mot_de_passe)
+    utilisateur.save(update_fields=["password"])
+    # Un éventuel voleur de session est déconnecté : tous les jetons de rafraîchissement sont invalidés.
+    for jeton in OutstandingToken.objects.filter(user=utilisateur):
+        BlacklistedToken.objects.get_or_create(token=jeton)
+    return utilisateur

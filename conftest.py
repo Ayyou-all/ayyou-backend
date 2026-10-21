@@ -19,3 +19,11 @@ def hachage_rapide_des_mots_de_passe(settings):
 def dossier_medias_temporaire(settings, tmp_path):
     """Les fichiers envoyés pendant les tests vont dans un dossier jetable, jamais dans le vrai dossier medias/."""
     settings.MEDIA_ROOT = tmp_path / "medias"
+
+
+@pytest.fixture(autouse=True)
+def compteurs_de_limitation_remis_a_zero():
+    """Chaque test repart avec des compteurs de limitation de débit vides (sinon ils s'accumulent d'un test à l'autre)."""
+    from django.core.cache import cache
+
+    cache.clear()

@@ -2,7 +2,12 @@
 Services métier pour l'envoi et la gestion des notifications AYYOU.
 """
 
+import logging
 from typing import Optional
+
+from django.conf import settings
+from django.core.mail import send_mail
+
 from applications.utilisateurs.models import Utilisateur
 from .models import Notification, TypeNotification
 
@@ -24,6 +29,25 @@ def creer_notification(
         texte_vocal=texte_vocal or titre,
         reference_commande=reference_commande,
     )
+
+
+def envoyer_email(destinataire: Utilisateur, sujet: str, corps: str) -> bool:
+    """
+    Envoie un e-mail texte à un utilisateur. Ne lève jamais d'exception :
+    renvoie False si l'envoi échoue, pour que l'action métier reste enregistrée.
+    """
+    try:
+        send_mail(
+            subject=sujet,
+            message=corps,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[destinataire.courriel],
+            fail_silently=False,
+        )
+        return True
+    except Exception as exc:
+        logging.getLogger("ayyou").error(f"Échec envoi e-mail « {sujet} » à {destinataire.courriel} : {exc}", exc_info=True)
+        return False
 
 
 def marquer_notification_comme_lue(notification_id: int, utilisateur: Utilisateur) -> Optional[Notification]:

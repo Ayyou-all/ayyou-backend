@@ -7,6 +7,8 @@ Vues d'authentification.
 | POST    | /api/authentification/connexion/      | Public       |
 | POST    | /api/authentification/rafraichir/     | Public (jeton de rafraîchissement) |
 | POST    | /api/authentification/deconnexion/    | Connecté     |
+| POST    | /api/authentification/mot-de-passe-oublie/        | Public |
+| POST    | /api/authentification/reinitialiser-mot-de-passe/ | Public |
 
 Exemple — connexion :
     POST {"identifiant": "fatou.diop@ayyou.sn", "mot_de_passe": "MotDePasse!2026"}
@@ -32,13 +34,16 @@ from .serializers import (
     SerializerDemandeCode,
     SerializerInscription,
     SerializerRafraichissement,
+    SerializerReinitialisationMotDePasse,
     SerializerVerificationCode,
 )
 from .services import (
     authentifier,
     creer_compte,
+    demander_reinitialisation_mot_de_passe,
     generer_et_envoyer_code_verification,
     generer_jetons,
+    reinitialiser_mot_de_passe,
     verifier_code_email,
 )
 
@@ -133,3 +138,31 @@ class VueVerifierCodeVerification(APIView):
         serializer.is_valid(raise_exception=True)
         verifier_code_email(serializer.validated_data["courriel"], serializer.validated_data["code"])
         return Response({"succes": True, "valide": True, "message": "Code de vérification validé avec succès."})
+
+
+class VueMotDePasseOublie(APIView):
+    """Envoie un code de réinitialisation par e-mail (réponse identique que le compte existe ou non)."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "connexion"
+
+    def post(self, request):
+        serializer = SerializerDemandeCode(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(demander_reinitialisation_mot_de_passe(serializer.validated_data["courriel"]))
+
+
+class VueReinitialiserMotDePasse(APIView):
+    """Vérifie le code reçu par e-mail et enregistre le nouveau mot de passe."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "connexion"
+
+    def post(self, request):
+        serializer = SerializerReinitialisationMotDePasse(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        donnees = serializer.validated_data
+        reinitialiser_mot_de_passe(donnees["courriel"], donnees["code"], donnees["nouveau_mot_de_passe"])
+        return Response({"succes": True, "message": "Mot de passe modifié. Vous pouvez maintenant vous connecter."})

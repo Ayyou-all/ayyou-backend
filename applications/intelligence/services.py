@@ -214,6 +214,38 @@ def repondre_au_message_chatbot(message_texte: str, budget_fcfa: int = None, qua
     }
 
 
+def analyser_recherche_vocale(texte: str) -> dict:
+    """
+    Recherche vocale : le service IA transforme la phrase dictée en filtres
+    (spécialités, budget, quartier, tri par prix, restaurants ouverts).
+    Seuls les quartiers où se trouvent des restaurants actifs sont reconnus.
+    """
+    quartiers = list(
+        Etablissement.objects.filter(statut_validation="ACTIF")
+        .exclude(quartier_ville="")
+        .values_list("quartier_ville", flat=True)
+        .distinct()
+    )
+    reponse_ia = appel_service_ia("ia/recherche-vocale/", {"texte": texte, "quartiers_connus": quartiers})
+    if reponse_ia and "termes_recherche" in reponse_ia:
+        return {**reponse_ia, "texte": texte, "source": "FASTAPI_IA"}
+
+    # REPLI LOCAL : sans le service IA, on cherche simplement les mots significatifs de la phrase.
+    mots = [mot.strip(".,;:!?'\"").lower() for mot in texte.split()]
+    return {
+        "texte": texte,
+        "texte_normalise": texte.lower(),
+        "specialites": [],
+        "termes_recherche": [],
+        "mots_libres": [mot for mot in mots if len(mot) >= 4 and not mot.isdigit()],
+        "budget_max_fcfa": None,
+        "quartier": None,
+        "tri": None,
+        "ouvert_seulement": False,
+        "source": "REPLI_LOCAL",
+    }
+
+
 # En dessous de ces seuils, on n'affiche pas de prévision ni d'analyse : elles seraient fausses.
 MINIMUM_COMMANDES_PREVISIONS = 20  # sur les 4 dernières semaines
 MINIMUM_COMMANDES_RAPPORT = 5  # sur les 7 derniers jours
