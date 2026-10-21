@@ -73,6 +73,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Sert le CSS / JS de l'admin Django en production (gunicorn ne sert pas les fichiers statiques)
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -174,6 +176,11 @@ USE_TZ = True
 # --- Fichiers statiques et médias ---------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # Fichiers statiques compressés (gzip / brotli) servis par WhiteNoise
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 MEDIA_URL = "/medias/"
 MEDIA_ROOT = BASE_DIR / os.getenv("AYYOU_DOSSIER_MEDIAS", "medias")
 
