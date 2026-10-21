@@ -278,6 +278,16 @@ class SerializerCreationCommande(SerializerPositionLivraison):
     source_video_id = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     articles = SerializerLigneCreation(many=True, required=False)
 
+    def validate_adresse_livraison(self, valeur):
+        from applications.communs.validation import texte_obligatoire
+
+        return texte_obligatoire(valeur, "Indiquez l'adresse de livraison.")
+
+    def validate_telephone_contact(self, valeur):
+        from applications.communs.validation import normaliser_telephone
+
+        return normaliser_telephone(valeur) if valeur.strip() else ""
+
 
 class SerializerActionAcceptation(serializers.Serializer):
     delai_minutes = serializers.IntegerField(min_value=5, max_value=180, default=25)

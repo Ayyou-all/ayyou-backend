@@ -332,3 +332,74 @@ class SerializerChangementDisponibilite(serializers.Serializer):
 
 class SerializerValidationPinLivreur(serializers.Serializer):
     code_pin = serializers.RegexField(r"^\d{4}$", error_messages={"invalid": "Le PIN contient 4 chiffres."})
+
+
+class SerializerModificationProfilLivreur(serializers.Serializer):
+    """
+    Champs modifiables par le livreur dans son profil (tous facultatifs).
+    Chaque erreur est renvoyée sous le nom du champ concerné.
+    """
+
+    prenom = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    nom = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    telephone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    adresse = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    type_vehicule = serializers.CharField(required=False, allow_blank=True)
+    nom_vehicule = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    immatriculation = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    zone_principale = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    numero_reversement = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    operateur_reversement = serializers.CharField(required=False, allow_blank=True)
+    ancien_mot_de_passe = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    nouveau_mot_de_passe = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    def validate_prenom(self, valeur):
+        from applications.communs.validation import texte_obligatoire
+
+        return texte_obligatoire(valeur, "Le prénom est obligatoire.")
+
+    def validate_nom(self, valeur):
+        from applications.communs.validation import texte_obligatoire
+
+        return texte_obligatoire(valeur, "Le nom est obligatoire.")
+
+    def validate_telephone(self, valeur):
+        from applications.communs.validation import valider_telephone_unique
+
+        return valider_telephone_unique(valeur, self.context["utilisateur"])
+
+    def validate_type_vehicule(self, valeur):
+        from .models import TypeVehicule
+
+        valeur = valeur.strip().upper()
+        if valeur and valeur not in TypeVehicule.values:
+            raise serializers.ValidationError("Type de véhicule inconnu.")
+        return valeur
+
+    def validate_numero_reversement(self, valeur):
+        from applications.communs.validation import normaliser_telephone
+
+        return normaliser_telephone(valeur) if valeur.strip() else ""
+
+    def validate_operateur_reversement(self, valeur):
+        from applications.communs.choix import OperateurMobileMoney
+
+        if valeur and valeur not in OperateurMobileMoney.values:
+            raise serializers.ValidationError("Opérateur Mobile Money inconnu.")
+        return valeur
+
+    def validate(self, donnees):
+        nouveau = (donnees.get("nouveau_mot_de_passe") or "").strip()
+        if nouveau:
+            from applications.communs.validation import valider_nouveau_mot_de_passe
+
+            utilisateur = self.context["utilisateur"]
+            # L'ancien mot de passe est obligatoire : un jeton volé ne suffit pas à changer le mot de passe.
+            if not utilisateur.check_password(donnees.get("ancien_mot_de_passe") or ""):
+                raise serializers.ValidationError({"ancien_mot_de_passe": "L'ancien mot de passe saisi est incorrect."})
+            try:
+                valider_nouveau_mot_de_passe(nouveau, utilisateur)
+            except serializers.ValidationError as erreur:
+                raise serializers.ValidationError({"nouveau_mot_de_passe": erreur.detail})
+            donnees["nouveau_mot_de_passe"] = nouveau
+        return donnees

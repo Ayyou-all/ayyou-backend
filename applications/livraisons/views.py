@@ -12,13 +12,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from applications.commandes.models import Commande
-from applications.communs.choix import OperateurMobileMoney
-from applications.communs.erreurs import ErreurMetier
 from applications.communs.fichiers import valider_document, valider_image
 from applications.utilisateurs.permissions import EstLivreur
 
-from .models import TypeVehicule
 from .serializers import (
+    SerializerModificationProfilLivreur,
     SerializerChangementDisponibilite,
     SerializerLivraisonEnCours,
     SerializerMiseAJourPosition,
@@ -236,84 +234,45 @@ class VueMonProfilLivreur(APIView):
         return Response(SerializerProfilLivreur(profil, context={"request": request}).data)
 
     def patch(self, request):
+        from django.db import transaction
+
         profil = obtenir_profil_livreur(request.user)
         user = request.user
-        data = request.data
-
-        # 1. Mise à jour des informations personnelles de l'utilisateur
-        utilisateur_modifie = False
-        champs_utilisateur = {
-            "prenom": data.get("prenom"),
-            "nom": data.get("nom"),
-            "telephone": data.get("telephone"),
-            "adresse": data.get("adresse"),
+        # Anciens noms de champs (camelCase) encore acceptés
+        alias = {
+            "nouveauMotDePasse": "nouveau_mot_de_passe", "mot_de_passe": "nouveau_mot_de_passe",
+            "ancienMotDePasse": "ancien_mot_de_passe", "typeVehicule": "type_vehicule",
+            "nomVehicule": "nom_vehicule", "numeroPlaque": "immatriculation",
+            "zonePrincipale": "zone_principale", "zoneActivite": "zone_principale",
         }
-        for champ, valeur in champs_utilisateur.items():
-            if valeur is not None:
-                setattr(user, champ, str(valeur).strip())
-                utilisateur_modifie = True
+        donnees = {}
+        for cle in request.data:
+            if cle in request.FILES:
+                continue
+            donnees[alias.get(cle, cle)] = request.data.get(cle)
+        serializer = SerializerModificationProfilLivreur(data=donnees, context={"utilisateur": user})
+        serializer.is_valid(raise_exception=True)
+        valeurs = serializer.validated_data
 
-        # Mise à jour de la photo de profil (fichier contrôlé : vraie image JPG/PNG/WEBP)
-        if "photo" in request.FILES:
-            user.photo = valider_image(request.FILES["photo"])
-            utilisateur_modifie = True
-
-        # Mise à jour du mot de passe
-        nouveau_mdp = data.get("nouveau_mot_de_passe") or data.get("nouveauMotDePasse") or data.get("mot_de_passe")
-        if nouveau_mdp:
-            nouveau_mdp = str(nouveau_mdp).strip()
-            if len(nouveau_mdp) < 6:
-                raise ErreurMetier("Le mot de passe doit comporter au moins 6 caractères.", code="mot_de_passe_court")
-
-            # L'ancien mot de passe est obligatoire : un jeton volé ne suffit pas à changer le mot de passe.
-            ancien_mdp = data.get("ancien_mot_de_passe") or data.get("ancienMotDePasse")
-            if not ancien_mdp or not user.check_password(ancien_mdp):
-                raise ErreurMetier("L'ancien mot de passe saisi est incorrect.", code="ancien_mot_de_passe_invalide")
-
-            user.set_password(nouveau_mdp)
-            utilisateur_modifie = True
-
-        if utilisateur_modifie:
+        with transaction.atomic():
+            # 1. Informations personnelles
+            for champ in ("prenom", "nom", "telephone", "adresse"):
+                if champ in valeurs:
+                    setattr(user, champ, valeurs[champ].strip())
+            # Photo de profil (fichier contrôlé : vraie image JPG/PNG/WEBP)
+            if "photo" in request.FILES:
+                user.photo = valider_image(request.FILES["photo"])
+            if valeurs.get("nouveau_mot_de_passe"):
+                user.set_password(valeurs["nouveau_mot_de_passe"])
             user.save()
 
-        # 2. Mise à jour des données spécifiques livreur (véhicule, immatriculation, zone)
-        profil_modifie = False
-        type_vehicule = data.get("type_vehicule") or data.get("typeVehicule")
-        if type_vehicule:
-            type_vehicule = str(type_vehicule).upper().strip()
-            if type_vehicule not in TypeVehicule.values:
-                raise ErreurMetier("Type de véhicule inconnu.", code="type_vehicule_invalide")
-            profil.type_vehicule = type_vehicule
-            profil_modifie = True
-
-        nom_vehicule = data.get("nom_vehicule") or data.get("nomVehicule")
-        if nom_vehicule is not None:
-            profil.nom_vehicule = str(nom_vehicule).strip()
-            profil_modifie = True
-
-        immatriculation = data.get("immatriculation") or data.get("numeroPlaque")
-        if immatriculation is not None:
-            profil.immatriculation = str(immatriculation).strip()
-            profil_modifie = True
-
-        zone_principale = data.get("zone_principale") or data.get("zonePrincipale") or data.get("zoneActivite")
-        if zone_principale is not None:
-            profil.zone_principale = str(zone_principale).strip()
-            profil_modifie = True
-
-        numero_reversement = data.get("numero_reversement")
-        if numero_reversement is not None:
-            profil.numero_reversement = str(numero_reversement).replace(" ", "")
-            profil_modifie = True
-
-        operateur_reversement = data.get("operateur_reversement")
-        if operateur_reversement:
-            if operateur_reversement not in OperateurMobileMoney.values:
-                raise ErreurMetier("Opérateur Mobile Money inconnu.", code="operateur_invalide")
-            profil.operateur_reversement = operateur_reversement
-            profil_modifie = True
-
-        if profil_modifie:
+            # 2. Données spécifiques livreur (véhicule, immatriculation, zone, reversements)
+            for champ in ("nom_vehicule", "immatriculation", "zone_principale", "numero_reversement"):
+                if champ in valeurs:
+                    setattr(profil, champ, valeurs[champ].strip())
+            for champ in ("type_vehicule", "operateur_reversement"):
+                if valeurs.get(champ):
+                    setattr(profil, champ, valeurs[champ])
             profil.save()
 
         # 3. Téléversement éventuel de documents justificatifs (Permis recto / verso)
