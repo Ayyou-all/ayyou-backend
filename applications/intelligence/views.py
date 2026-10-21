@@ -9,8 +9,9 @@ from rest_framework.views import APIView
 
 from applications.utilisateurs.permissions import AbonnementValide, EstGerantEtablissement
 
-from .serializers import SerializerRequeteChatbot, SerializerRequeteRecommandations
+from .serializers import SerializerRequeteChatbot, SerializerRequeteRechercheVocale, SerializerRequeteRecommandations
 from .services import (
+    analyser_recherche_vocale,
     generer_rapport_hebdo_etablissement,
     obtenir_previsions_etablissement,
     recommander_plats_pour_client,
@@ -79,6 +80,17 @@ class VueChatbotCulinaire(APIView):
             request=request,
         )
         return Response(reponse)
+
+
+class VueRechercheVocale(APIView):
+    """Recherche vocale : phrase dictée par le client -> filtres appliqués au catalogue."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = SerializerRequeteRechercheVocale(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(analyser_recherche_vocale(serializer.validated_data["texte"]))
 
 
 class VuePrevisionsRestaurant(APIView):

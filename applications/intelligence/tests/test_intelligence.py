@@ -169,3 +169,46 @@ def test_rapport_hebdomadaire_gerant(donnees_intelligence):
     # Sans historique suffisant : aucun chiffre ni conseil inventé
     assert data["donnees_suffisantes"] is False
     assert data["message"] == "Données insuffisantes pour produire une prévision fiable."
+
+
+# ---------------------------------------------------------------------------
+# Recherche vocale
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_recherche_vocale_transmet_les_quartiers_reels_au_service_ia(donnees_intelligence):
+    etablissement = Etablissement.objects.get(nom_utilisateur="lagonbleu")
+    etablissement.quartier_ville = "Almadies"
+    etablissement.save(update_fields=["quartier_ville"])
+    reponse_ia_simulee = {
+        "texte_normalise": "un thiof aux almadies",
+        "specialites": ["poisson"],
+        "termes_recherche": ["poisson", "thiof"],
+        "mots_libres": [],
+        "budget_max_fcfa": None,
+        "quartier": "Almadies",
+        "tri": None,
+        "ouvert_seulement": False,
+    }
+
+    with patch("applications.intelligence.services.appel_service_ia", return_value=reponse_ia_simulee) as appel:
+        rep = APIClient().post("/api/ia/recherche-vocale/", {"texte": "Un thiof aux Almadies"}, format="json")
+
+    assert rep.status_code == 200
+    assert rep.json()["source"] == "FASTAPI_IA"
+    assert rep.json()["quartier"] == "Almadies"
+    assert appel.call_args.args[1] == {"texte": "Un thiof aux Almadies", "quartiers_connus": ["Almadies"]}
+
+
+@pytest.mark.django_db
+def test_recherche_vocale_repli_si_service_ia_injoignable(db):
+    with patch("applications.intelligence.services.appel_service_ia", return_value=None):
+        rep = APIClient().post("/api/ia/recherche-vocale/", {"texte": "Chez Loutcha, vite !"}, format="json")
+
+    assert rep.status_code == 200
+    assert rep.json()["source"] == "REPLI_LOCAL"
+    assert rep.json()["mots_libres"] == ["chez", "loutcha", "vite"]
+
+
+@pytest.mark.django_db
+def test_recherche_vocale_texte_vide_refuse(db):
+    assert APIClient().post("/api/ia/recherche-vocale/", {"texte": ""}, format="json").status_code == 400
