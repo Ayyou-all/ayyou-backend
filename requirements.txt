@@ -12,6 +12,8 @@ httpx==0.28.1
 
 # Serveur d'application de production
 gunicorn==23.0.0
+# Sert les fichiers statiques (CSS / JS de l'admin Django) derrière gunicorn
+whitenoise==6.12.0
 
 # Tests
 pytest==9.1.1
