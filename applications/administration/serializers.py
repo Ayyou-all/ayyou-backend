@@ -15,7 +15,16 @@ class SerializerDecisionPartenaire(serializers.Serializer):
     """Validation ou changement de statut d'un partenaire par l'administrateur."""
 
     nouveau_statut = serializers.ChoiceField(choices=StatutValidationPartenaire.choices)
-    motif_decision = serializers.CharField(required=False, allow_blank=True, default="")
+    motif_decision = serializers.CharField(required=False, allow_blank=True, default="", max_length=1000)
+
+    def validate(self, donnees):
+        from .services import STATUTS_AVEC_MOTIF
+
+        if donnees["nouveau_statut"] in STATUTS_AVEC_MOTIF and not donnees.get("motif_decision", "").strip():
+            raise serializers.ValidationError(
+                {"motif_decision": "Indiquez le motif : il est envoyé par e-mail au partenaire."}
+            )
+        return donnees
 
 
 class SerializerEtablissementModeration(serializers.ModelSerializer):

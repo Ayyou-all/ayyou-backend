@@ -129,3 +129,31 @@ class SerializerVerificationCode(serializers.Serializer):
     def validate_code(self, code):
         return code.strip()
 
+
+
+class SerializerReinitialisationMotDePasse(serializers.Serializer):
+    """Nouveau mot de passe choisi après réception du code de réinitialisation."""
+
+    courriel = serializers.EmailField()
+    code = serializers.CharField(min_length=6, max_length=6)
+    nouveau_mot_de_passe = serializers.CharField(write_only=True, min_length=6)
+    confirmation_mot_de_passe = serializers.CharField(write_only=True)
+
+    def validate_courriel(self, courriel):
+        return courriel.lower().strip()
+
+    def validate_code(self, code):
+        return code.strip()
+
+    def validate(self, donnees):
+        if donnees["nouveau_mot_de_passe"] != donnees["confirmation_mot_de_passe"]:
+            raise serializers.ValidationError({"confirmation_mot_de_passe": "Les mots de passe ne correspondent pas."})
+        utilisateur = Utilisateur.objects.filter(courriel=donnees["courriel"]).first()
+        try:
+            password_validation.validate_password(donnees["nouveau_mot_de_passe"], utilisateur)
+        except Exception as erreur:  # ValidationError Django -> ValidationError DRF
+            messages = list(getattr(erreur, "messages", [str(erreur)]))
+            messages_valides = [m for m in messages if "trop courant" not in m.lower() and "common" not in m.lower()]
+            if messages_valides:
+                raise serializers.ValidationError({"nouveau_mot_de_passe": messages_valides})
+        return donnees

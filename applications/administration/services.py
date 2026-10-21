@@ -20,10 +20,78 @@ from applications.communs.erreurs import ErreurMetier, TransitionInterdite
 from applications.etablissements.models import Etablissement, TypeEtablissement
 from applications.livraisons.models import DisponibiliteLivreur, ProfilLivreur
 from applications.notifications.models import TypeNotification
-from applications.notifications.services import creer_notification
+from applications.notifications.services import creer_notification, envoyer_email
 from applications.utilisateurs.models import StatutDocument
 
 STATUTS_SANCTION = {StatutValidationPartenaire.SUSPENDU, StatutValidationPartenaire.BANNI}
+
+# Décisions qui doivent être justifiées : le partenaire reçoit le motif par e-mail.
+STATUTS_AVEC_MOTIF = {
+    StatutValidationPartenaire.DEMANDE_CORRECTION,
+    StatutValidationPartenaire.SUSPENDU,
+    StatutValidationPartenaire.BANNI,
+}
+
+
+def envoyer_email_decision_partenaire(
+    utilisateur, nom_compte: str, est_restaurant: bool, ancien_statut: str, nouveau_statut: str, motif: str
+) -> bool | None:
+    """
+    E-mail au partenaire après une décision de l'administrateur.
+    Renvoie True/False selon l'envoi, ou None quand la décision ne donne pas lieu à un e-mail.
+    """
+    from django.conf import settings
+
+    lien_connexion = f"{settings.URL_FRONTEND.rstrip('/')}/connexion"
+    compte = f"votre restaurant « {nom_compte} »" if est_restaurant else "votre compte livreur"
+    premiere_etape = (
+        "ajoutez vos plats et vos horaires dans votre espace gérant pour recevoir vos premières commandes"
+        if est_restaurant
+        else "passez « En ligne » depuis votre espace livreur pour recevoir vos premières courses"
+    )
+
+    if nouveau_statut == StatutValidationPartenaire.ACTIF:
+        if ancien_statut == StatutValidationPartenaire.SUSPENDU:
+            sujet = "Votre compte AYYOU est de nouveau actif"
+            texte = f"Bonne nouvelle : {compte} a été réactivé. Vous pouvez reprendre votre activité dès maintenant."
+        else:
+            sujet = "Votre compte AYYOU est activé"
+            texte = (
+                f"Félicitations : après vérification de votre dossier, {compte} est validé et activé.\n\n"
+                f"Première étape : {premiere_etape}."
+            )
+    elif nouveau_statut == StatutValidationPartenaire.DEMANDE_CORRECTION:
+        sujet = "Votre dossier AYYOU doit être complété"
+        texte = (
+            f"Nous avons examiné le dossier de {compte}. Il ne peut pas encore être validé.\n\n"
+            f"Motif : {motif}\n\n"
+            "Connectez-vous, corrigez les éléments demandés dans votre profil, puis votre dossier sera réexaminé."
+        )
+    elif nouveau_statut == StatutValidationPartenaire.SUSPENDU and ancien_statut in {
+        StatutValidationPartenaire.EN_ATTENTE_VALIDATION,
+        StatutValidationPartenaire.DEMANDE_CORRECTION,
+    }:
+        sujet = "Votre demande d'inscription AYYOU a été refusée"
+        texte = (
+            f"Après examen, la demande d'inscription de {compte} n'a pas été acceptée.\n\n"
+            f"Motif : {motif}\n\n"
+            "Si vous pensez pouvoir corriger ce point, répondez à cet e-mail ou contactez le support AYYOU."
+        )
+    elif nouveau_statut == StatutValidationPartenaire.SUSPENDU:
+        sujet = "Votre compte AYYOU est suspendu"
+        texte = (
+            f"{compte[0].upper() + compte[1:]} est suspendu : vous ne recevez plus de commandes ni de courses.\n\n"
+            f"Motif : {motif}\n\n"
+            "Contactez le support AYYOU pour régulariser votre situation."
+        )
+    elif nouveau_statut == StatutValidationPartenaire.BANNI:
+        sujet = "Votre compte AYYOU a été fermé"
+        texte = f"{compte[0].upper() + compte[1:]} a été définitivement fermé.\n\nMotif : {motif}"
+    else:
+        return None
+
+    corps = f"Bonjour {utilisateur.prenom},\n\n{texte}\n\nSe connecter : {lien_connexion}\n\nL'équipe AYYOU"
+    return envoyer_email(utilisateur, sujet, corps)
 
 
 def valider_documents_en_attente(utilisateur) -> None:
@@ -53,6 +121,7 @@ def appliquer_decision_etablissement(
             f"Transition de validation interdite de '{statut_actuel}' vers '{nouveau_statut}'."
         )
 
+    motif_decision = motif_decision.strip()
     etablissement.statut_validation = nouveau_statut
     etablissement.motif_decision = motif_decision
     if nouveau_statut in STATUTS_SANCTION:
@@ -80,6 +149,10 @@ def appliquer_decision_etablissement(
         type_notification=TypeNotification.VALIDATION_COMPTE,
         texte_vocal=titre,
     )
+    # Résultat de l'envoi lu par la vue pour prévenir l'administrateur en cas d'échec.
+    etablissement.email_envoye = envoyer_email_decision_partenaire(
+        etablissement.gerant, etablissement.nom, True, statut_actuel, nouveau_statut, motif_decision
+    )
 
     return etablissement
 
@@ -102,6 +175,7 @@ def appliquer_decision_livreur(
             f"Transition de validation interdite de '{statut_actuel}' vers '{nouveau_statut}'."
         )
 
+    motif_decision = motif_decision.strip()
     profil_livreur.statut_validation = nouveau_statut
     profil_livreur.motif_decision = motif_decision
     if nouveau_statut in STATUTS_SANCTION:
@@ -128,6 +202,11 @@ def appliquer_decision_livreur(
         message=message,
         type_notification=TypeNotification.VALIDATION_COMPTE,
         texte_vocal=titre,
+    )
+    # Résultat de l'envoi lu par la vue pour prévenir l'administrateur en cas d'échec.
+    profil_livreur.email_envoye = envoyer_email_decision_partenaire(
+        profil_livreur.utilisateur, profil_livreur.utilisateur.nom_complet, False,
+        statut_actuel, nouveau_statut, motif_decision,
     )
 
     return profil_livreur
@@ -466,3 +545,19 @@ def admin_debloquer_livraison(commande, admin):
         message="Le support a débloqué la livraison : demandez à nouveau le code PIN au client.",
         reference_commande=commande.reference,
     )
+
+
+def envoyer_alerte_utilisateur(utilisateur, message: str) -> dict:
+    """
+    Message officiel de la modération : notification dans l'application + e-mail.
+    L'e-mail compte surtout pour un compte désactivé, qui ne peut plus se connecter pour lire ses notifications.
+    """
+    titre = "Message de la modération AYYOU"
+    creer_notification(
+        destinataire=utilisateur,
+        titre=titre,
+        message=message,
+        type_notification=TypeNotification.INFO_SYSTEME,
+    )
+    email_envoye = envoyer_email(utilisateur, titre, f"Bonjour {utilisateur.prenom},\n\n{message}\n\nL'équipe AYYOU")
+    return {"notification_creee": True, "email_envoye": email_envoye}
