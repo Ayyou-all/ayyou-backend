@@ -350,7 +350,7 @@ SERVICE_IA_URL = os.getenv("AYYOU_SERVICE_IA_URL", "http://127.0.0.1:8001")
 # La valeur par défaut est conservée pour rester compatible avec le conteneur IA actuel,
 # qui ne reçoit aucune variable d'environnement depuis docker-compose.
 SERVICE_IA_CLE_INTERNE = os.getenv("AYYOU_SERVICE_IA_CLE_INTERNE", "cle-secrete-interne-ayyou-ia-2026")
-SERVICE_IA_DELAI_ATTENTE_SECONDES = int(os.getenv("AYYOU_SERVICE_IA_DELAI_SECONDES", "8"))
+SERVICE_IA_DELAI_ATTENTE_SECONDES = int(os.getenv("AYYOU_SERVICE_IA_DELAI_SECONDES", "12"))
 
 # --- Journalisation (sans données personnelles ni secrets) --------------------
 LOGGING = {
